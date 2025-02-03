@@ -7,28 +7,28 @@ exclude: |
       # others
       ^(.cached|.db|.mypy_cache|.pytest_cache|.venv|.venv_dev|.tox|logs|releases)/|
       # source code files
-      ^(reversi.py|qt_collapsible_box.py|utils/notices.txt)$
+      ^(qt_collapsible_box.py|utils/notices.txt)$
 repos:
   # note: use following cmd to update repo rev to latest version
   #     export http_proxy=socks5://127.0.0.1:10808 https_proxy=socks5://127.0.0.1:10808
   #     pre-commit autoupdate
   #
   - repo: https://github.com/asottile/pyupgrade
-    rev: v3.3.1
+    rev: v3.16.0
     hooks:
       - id: pyupgrade
         args: [ --py38-plus ]
   - repo: https://github.com/PyCQA/isort
-    rev: 5.11.4
+    rev: 5.13.2
     hooks:
       - id: isort
-  - repo: https://github.com/psf/black
-    rev: 22.12.0
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    rev: 24.4.2
     hooks:
       - id: black
-        args: [ --safe, --quiet, --line-length=120 ]
+        args: [ --safe, --quiet, --line-length=120, --target-version=py38 ]
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v4.6.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -37,12 +37,19 @@ repos:
       - id: check-yaml
       - id: debug-statements
         language_version: python3
+      - id: check-merge-conflict
+      - id: check-case-conflict
   - repo: https://github.com/pre-commit/pygrep-hooks
     rev: v1.10.0
     hooks:
       - id: python-use-type-annotations
+  - repo: https://github.com/PyCQA/autoflake
+    rev: v2.3.1
+    hooks:
+      - id: autoflake
+        args: ['--in-place', '--remove-unused-variables', '--remove-all-unused-imports', '--ignore-init-module-imports']
   - repo: https://github.com/PyCQA/flake8
-    rev: 6.0.0
+    rev: 7.1.0
     hooks:
       - id: flake8
         language_version: python3.8
@@ -50,19 +57,40 @@ repos:
           - flake8-typing-imports==1.14.0
           - flake8-bugbear == 23.1.17
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v0.991
+    rev: v1.10.1
     hooks:
       - id: mypy
         args: [ ]
         additional_dependencies:
-          - iniconfig>=1.1.0
-          - py>=1.8.2
-          - attrs>=19.2.0
-          - packaging
-          - tomli
-          - types-atomicwrites
-          - types-pkg_resources
           - types-requests
           - types-toml
           #         - types-selenium
           - types-psutil
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.3.0
+    hooks:
+      - id: codespell
+        additional_dependencies:
+        - tomli
+        args:
+#          - --write-changes
+          - --ignore-words-list=millseconds,te,aci,checkIn,aks
+          - --skip="*.csv,*.json"
+          - --quiet-level=2
+        exclude_types: [csv, json, html]
+        exclude: ^utils/reference_data/
+  - repo: https://github.com/cdce8p/python-typing-update
+    rev: v0.6.0
+    hooks:
+      - id: python-typing-update
+        args:
+          - --py38-plus
+          - --force
+          - --keep-updates
+#        files: ^(homeassistant|tests|script)/.+\.py$
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.0
+    hooks:
+      - id: ruff
+        args: [ --fix ]
+      - id: ruff-format

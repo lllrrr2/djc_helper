@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import platform
 import random
 import re
@@ -12,7 +14,17 @@ from download import download_github_raw_content
 from first_run import is_weekly_first_run
 from log import color, logger
 from upload_lanzouyun import Uploader
-from util import async_message_box, bypass_proxy, is_run_in_github_action, is_windows, try_except, use_proxy
+from util import (
+    async_message_box,
+    bypass_proxy,
+    get_next_regular_activity_desc,
+    get_time_since_last_update,
+    is_run_in_github_action,
+    is_windows,
+    try_except,
+    use_by_myself,
+    use_proxy,
+)
 from version import now_version, ver_time
 
 if is_windows():
@@ -74,7 +86,9 @@ def try_manaual_update(ui: UpdateInfo) -> bool:
 
         ask_update = True
         if platform.system() == "Windows":
-            message = f"当前版本为{now_version}，已有最新版本{ui.latest_version}. 你需要更新吗?\n" f"{ui.update_message}"
+            message = (
+                f"当前版本为{now_version}，已有最新版本{ui.latest_version}. 你需要更新吗?\n" f"{ui.update_message}"
+            )
             res = win32api.MessageBox(0, message, "更新", win32con.MB_OKCANCEL)
             if res == win32con.IDOK:
                 ask_update = True
@@ -87,7 +101,9 @@ def try_manaual_update(ui: UpdateInfo) -> bool:
         if ask_update:
             if not is_shared_content_blocked(ui.netdisk_link):
                 webbrowser.open(ui.netdisk_link)
-                win32api.MessageBox(0, f"蓝奏云网盘提取码为： {ui.netdisk_passcode}", "蓝奏云网盘提取码", win32con.MB_ICONINFORMATION)
+                win32api.MessageBox(
+                    0, f"蓝奏云网盘提取码为： {ui.netdisk_passcode}", "蓝奏云网盘提取码", win32con.MB_ICONINFORMATION
+                )
             else:
                 # 如果分享的网盘链接被系统屏蔽了，写日志并弹窗提示
                 logger.warning(f"网盘链接={ui.netdisk_link}又被系统干掉了=-=")
@@ -142,11 +158,13 @@ def get_latest_version_from_github(common_config: CommonConfig) -> str:
 
 @try_except()
 def notify_manual_check_update_on_release_too_long(config: CommonConfig):
-    time_since_last_update = datetime.now() - datetime.strptime(ver_time, "%Y.%m.%d")
-    if time_since_last_update.days >= 21:
+    time_since_last_update = get_time_since_last_update()
+    max_update_duration_days = 45
+    if time_since_last_update.days >= max_update_duration_days:
         msg = (
             f"当前版本更新于{ver_time}，距今已有{time_since_last_update}。\n"
             "可能原因如下:\n"
+            f"    没有新活动：可能最近没有新活动，根据以往经验，下次常规的活动可能是 {get_next_regular_activity_desc()}\n"
             f"    购买了DLC：可能是dlc出了bug，后续版本可能已经修复\n"
             f"    未购买DLC：可能是因网络问题而未能检查更新\n"
             "\n"
@@ -156,10 +174,15 @@ def notify_manual_check_update_on_release_too_long(config: CommonConfig):
             "\n"
             "如果在网盘没有发现更新的版本，说明自这次版本发布至今，没有任何新活动需要添加，也没有bug需要修复，无视本提示即可。\n"
             "本提示是用于在无法检查更新，且当前版本已经发布很久的情况下，每周保底提醒一次更新可能存在的新版本，避免一直使用好几个月以前的版本而无法领到新活动的奖励\n"
+            "\n"
+            "关于活动的发布周期，可以参考我之前统计的一个帖子，里面有过去几年各个月份蚊子腿活动发布的时间点：\n"
+            "https://docs.qq.com/sheet/DYkNUemlxT2pibHNs\n"
         )
         logger.warning(color("bold_yellow") + msg)
         if is_weekly_first_run(f"notify_manual_update_if_can_not_connect_github_v{now_version}"):
-            async_message_box(msg, "当前版本似乎太老了，请按提示确认是否存在更新的版本", open_url=config.netdisk_link, print_log=False)
+            async_message_box(
+                msg, "当前版本似乎太老了，请按提示确认是否存在更新的版本", open_url=config.netdisk_link, print_log=False
+            )
 
 
 # 获取最新版本号与下载网盘地址
@@ -219,7 +242,7 @@ def _get_update_info(changelog_page: str, readme_page: str) -> UpdateInfo:
 
     # 尝试提取更新信息
     update_message_list_match_groupdict_matches = re.search(
-        r"(?<=更新公告</h1>)\s*<ol.+?>(?P<update_message_list>(\s|\S)+?)</ol>", changelog_html_text, re.MULTILINE
+        r"(?<=更新公告</h1>)(\s|\S)+?<ol.+?>(?P<update_message_list>(\s|\S)+?)</ol>", changelog_html_text, re.MULTILINE
     )
     if update_message_list_match_groupdict_matches is not None:
         update_message_list_match_groupdict = update_message_list_match_groupdict_matches.groupdict()
@@ -230,7 +253,15 @@ def _get_update_info(changelog_page: str, readme_page: str) -> UpdateInfo:
                 f"{idx + 1}. {message}" for idx, message in enumerate(update_messages)
             )
     else:
-        async_message_box("走到这里说明提取更新信息的正则表达式不符合最新的网页了，请到群里@我反馈，多谢0-0", "检查更新出错了", show_once_daily=True)
+        update_info.update_message = (
+            "更新内容解析失败，不影响正常使用。如有兴趣，可查看最新版本 相关信息/CHANGELOG.MD 中最上面的内容"
+        )
+        if use_by_myself():
+            async_message_box(
+                ("走到这里说明提取更新信息的正则表达式不符合最新的网页了，去瞅瞅看是否需要调整正则表达式\n"),
+                f"(仅自己可见)提取更新内容出错了 {now_version} {ver_time}",
+                show_once_daily=True,
+            )
 
     logger.info(
         f"netdisk_address_matches={netdisk_address_matches}, selected=({update_info.netdisk_link}, {update_info.netdisk_passcode})"
@@ -275,11 +306,21 @@ def get_update_info_by_download_raw_file() -> UpdateInfo:
             break
 
     # 尝试提取更新信息
-    update_message_matches = re.search(r"(?<=更新公告)\s*(?P<update_message>(\s|\S)+?)\n\n", changelog_txt, re.MULTILINE)
+    update_message_matches = re.search(
+        r"(?<=更新公告)\s*(?P<update_message>(\s|\S)+?)\n\n", changelog_txt, re.MULTILINE
+    )
     if update_message_matches is not None:
         update_info.update_message = update_message_matches.groupdict()["update_message"]
     else:
-        async_message_box("走到这里说明从raw文件解析更新信息的正则表达式不符合最新的网页了，请到群里@我反馈，多谢0-0", "检查更新出错了", show_once_daily=True)
+        update_info.update_message = (
+            "更新内容解析失败，不影响正常使用。如有兴趣，可查看最新版本 相关信息/CHANGELOG.MD 中最上面的内容"
+        )
+        if use_by_myself():
+            async_message_box(
+                ("走到这里说明从raw文件解析更新信息的正则表达式不符合最新的网页了，去瞅瞅看是否需要调整正则表达式\n"),
+                f"(仅自己可见)提取更新内容出错了 {now_version} {ver_time}",
+                show_once_daily=True,
+            )
 
     logger.info(
         f"netdisk_address_matches={netdisk_address_matches}, selected=({update_info.netdisk_link}, {update_info.netdisk_passcode})"
@@ -325,15 +366,22 @@ def get_netdisk_addr(config: CommonConfig):
 @try_except(return_val_on_except="1.0.0")
 def get_version_from_gitee() -> str:
     logger.info("尝试从gitee获取更新信息")
+
+    version_list = get_version_list_from_gitee()
+    return version_list[0]
+
+
+def get_version_list_from_gitee() -> list[str]:
     api = "https://gitee.com/api/v5/repos/fzls/djc_helper/tags"
     res = requests.get(api, timeout=10).json()
 
     reg_version = r"v\d+(\.\d+)*"
     res = filter(lambda tag_info: re.match(reg_version, tag_info["name"]) is not None, res)
 
-    latest_version_info = max(res, key=lambda x: version_to_version_int_list(x["name"][1:]))
+    version_list = list([tag_info["name"][1:] for tag_info in res])
+    version_list.sort(key=version_to_version_int_list, reverse=True)
 
-    return latest_version_info["name"][1:]
+    return version_list
 
 
 if __name__ == "__main__":

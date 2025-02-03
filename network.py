@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 import time
 import traceback
 from typing import Callable
@@ -12,9 +13,48 @@ from config import CommonConfig, RetryConfig
 from const import appVersion, sVersionName
 from dao import ResponseInfo
 from log import color, logger
-from util import check_some_exception, get_meaningful_call_point_for_log
+from util import check_some_exception, get_meaningful_call_point_for_log, remove_prefix, remove_suffix
 
 jsonp_callback_flag = "jsonp_callback"
+
+
+def check_tencent_game_common_status_code(response: requests.Response) -> Exception | None:
+    """
+    检查是否属于腾讯游戏接口返回请求过快的情况
+    """
+    if response.status_code == 401 and "您的速度过快或参数非法，请重试哦" in response.text:
+        # res.status=401, Unauthorized <Response [401]>
+        #
+        # <html>
+        # <head><title>Tencent Game 401</title></head>
+        # <meta charset="utf-8" />
+        # <body bgcolor="white">
+        # <center><h1>Welcome Tencent Game 401</h1></center>
+        # <center><h1>您的速度过快或参数非法，请重试哦</h1></center>
+        # <hr><center>Welcome Tencent Game</center>
+        # </body>
+        # </html>
+        #
+        wait_seconds = 0.1 + random.random()
+        logger.warning(get_meaningful_call_point_for_log() + f"请求过快，等待{wait_seconds:.2f}秒后重试")
+        time.sleep(wait_seconds)
+        return Exception("请求过快")
+    elif response.status_code == 504 and "504 Gateway Time-out" in response.text:
+        # status_code=504 reason=Gateway Time-out
+        #
+        # <html>
+        # <head><title>504 Gateway Time-out</title></head>
+        # <body>
+        # <center><h1>504 Gateway Time-out</h1></center>
+        # <hr><center>stgw</center>
+        # </body>
+        # </html>
+        wait_seconds = 0.1 + random.random()
+        logger.warning(get_meaningful_call_point_for_log() + f"网关超时，等待{wait_seconds:.2f}秒后重试")
+        time.sleep(wait_seconds)
+        return Exception("网关超时")
+
+    return None
 
 
 class Network:
@@ -30,7 +70,7 @@ class Network:
         )
 
         self.base_headers = {
-            "User-Agent": "TencentDaojucheng={sVersionName}&appSource=android&appVersion={appVersion}&ch=10003&sDeviceID={sDeviceID}&firmwareVersion=9&phoneBrand=Xiaomi&phoneVersion=MIX+2&displayMetrics=1080 * 2030&cpu=AArch64 Processor rev 1 (aarch64)&net=wifi&sVersionName={sVersionName} Mobile GameHelper_1006/2103050005".format(
+            "User-Agent": "TencentDaojucheng={sVersionName}&appSource=android&appVersion={appVersion}&ch=10000&sDeviceID={sDeviceID}&firmwareVersion=9&phoneBrand=Xiaomi&phoneVersion=MIX+2&displayMetrics=1080 * 2030&cpu=AArch64 Processor rev 1 (aarch64)&net=wifi&sVersionName={sVersionName} Mobile GameHelper_1006/2103050005".format(
                 appVersion=appVersion,
                 sVersionName=sVersionName,
                 sDeviceID=sDeviceID,
@@ -52,11 +92,12 @@ class Network:
         is_normal_jsonp=False,
         need_unquote=True,
         extra_cookies="",
-        check_fn: Callable[[requests.Response], Exception | None] | None = None,
+        check_fn: Callable[[requests.Response], Exception | None] | None = check_tencent_game_common_status_code,
         extra_headers: dict[str, str] | None = None,
         use_this_cookies="",
+        prefix_to_remove="",
+        suffix_to_remove="",
     ) -> dict:
-
         cookies = self.base_cookies + extra_cookies
         if use_this_cookies != "":
             cookies = use_this_cookies
@@ -72,11 +113,17 @@ class Network:
         def request_fn() -> requests.Response:
             return requests.get(url, headers=get_headers, timeout=self.common_cfg.http_timeout)
 
+        actual_cookies = get_headers["Cookie"]
+
+        logger.debug(f"{ctx} cookies = {actual_cookies}")
+        if extra_headers is not None:
+            logger.debug(f"{ctx} extra_headers = {pretty_json(extra_headers)}")
+
         res = try_request(request_fn, self.common_cfg.retry, check_fn)
 
-        logger.debug(f"{ctx} cookies = {cookies}")
-
-        return process_result(ctx, res, pretty, print_res, is_jsonp, is_normal_jsonp, need_unquote)
+        return process_result(
+            ctx, res, pretty, print_res, is_jsonp, is_normal_jsonp, need_unquote, prefix_to_remove, suffix_to_remove
+        )
 
     def post(
         self,
@@ -90,12 +137,13 @@ class Network:
         is_normal_jsonp=False,
         need_unquote=True,
         extra_cookies="",
-        check_fn: Callable[[requests.Response], Exception | None] | None = None,
+        check_fn: Callable[[requests.Response], Exception | None] | None = check_tencent_game_common_status_code,
         extra_headers: dict[str, str] | None = None,
         disable_retry=False,
         use_this_cookies="",
+        prefix_to_remove="",
+        suffix_to_remove="",
     ) -> dict:
-
         cookies = self.base_cookies + extra_cookies
         if use_this_cookies != "":
             cookies = use_this_cookies
@@ -116,31 +164,42 @@ class Network:
         def request_fn() -> requests.Response:
             return requests.post(url, data=data, json=json, headers=post_headers, timeout=self.common_cfg.http_timeout)
 
+        actual_cookies = post_headers["Cookie"]
+
+        logger.debug(f"{ctx} data = {data}")
+        logger.debug(f"{ctx} json = {pretty_json(json)}")
+        logger.debug(f"{ctx} cookies = {actual_cookies}")
+        if extra_headers is not None:
+            logger.debug(f"{ctx} extra_headers = {pretty_json(extra_headers)}")
+
         if not disable_retry:
             res = try_request(request_fn, self.common_cfg.retry, check_fn)
         else:
             res = request_fn()
 
-        logger.debug(f"{ctx} data = {data}")
-        logger.debug(f"{ctx} json = {json}")
-        logger.debug(f"{ctx} cookies = {cookies}")
-
-        return process_result(ctx, res, pretty, print_res, is_jsonp, is_normal_jsonp, need_unquote)
+        return process_result(
+            ctx, res, pretty, print_res, is_jsonp, is_normal_jsonp, need_unquote, prefix_to_remove, suffix_to_remove
+        )
 
 
 def try_request(
     request_fn: Callable[[], requests.Response],
     retryCfg: RetryConfig,
-    check_fn: Callable[[requests.Response], Exception | None] | None = None,
+    check_fn: Callable[[requests.Response], Exception | None] | None = check_tencent_game_common_status_code,
 ) -> requests.Response | None:
     """
     :param check_fn: func(requests.Response) -> bool
     :type retryCfg: RetryConfig
     """
     for i in range(retryCfg.max_retry_count):
+        check_exception = None
+
         try:
             response: requests.Response = request_fn()
             fix_encoding(response)
+
+            if response is not None:
+                set_last_response_info(response.status_code, response.reason, response.text)
 
             if check_fn is not None:
                 check_exception = check_fn(response)
@@ -156,16 +215,21 @@ def try_request(
                 else:
                     return log_func
 
+            retry_wait_time = retryCfg.retry_wait_time
+            if check_exception is not None:
+                # 如果是由检查回调返回的异常，则默认里面进行了必要的超时等待，外侧不再尝试等待
+                retry_wait_time = 0
+
             extra_info = check_some_exception(exc)
             get_log_func(exc, logger.exception)("request failed, detail as below:" + extra_info, exc_info=exc)
             stack_info = color("bold_black") + "".join(traceback.format_stack())
             get_log_func(exc, logger.error)(f"full call stack=\n{stack_info}")
             get_log_func(exc, logger.warning)(
                 color("thin_yellow")
-                + f"{i + 1}/{retryCfg.max_retry_count}: request failed, wait {retryCfg.retry_wait_time}s。异常补充说明如下：{extra_info}"
+                + f"{i + 1}/{retryCfg.max_retry_count}: request failed, wait {retry_wait_time}s。异常补充说明如下：{extra_info}"
             )
             if i + 1 != retryCfg.max_retry_count:
-                time.sleep(retryCfg.retry_wait_time)
+                time.sleep(retry_wait_time)
 
     logger.error(f"重试{retryCfg.max_retry_count}次后仍失败")
     return None
@@ -187,7 +251,15 @@ last_process_result: dict | None = None
 
 
 def process_result(
-    ctx, res, pretty=False, print_res=True, is_jsonp=False, is_normal_jsonp=False, need_unquote=True
+    ctx,
+    res,
+    pretty=False,
+    print_res=True,
+    is_jsonp=False,
+    is_normal_jsonp=False,
+    need_unquote=True,
+    prefix_to_remove="",
+    suffix_to_remove="",
 ) -> dict:
     fix_encoding(res)
 
@@ -197,7 +269,30 @@ def process_result(
     if is_jsonp:
         data = jsonp2json(res.text, is_normal_jsonp, need_unquote)
     else:
-        data = res.json()
+        json_text = res.text
+
+        # 某些时候需要从一些 xx.js 的链接中获取数据，这类情况会返回一串js代码，定义一个数据变量，形如 var xxx = {...};
+        # 这时候我们需要移除特定的前缀和后缀，来吧数据部分提取出来
+        if prefix_to_remove != "":
+            json_text = remove_prefix(json_text, prefix_to_remove)
+        if suffix_to_remove != "":
+            json_text = remove_suffix(json_text, suffix_to_remove)
+
+        for _ in range(10):
+            try:
+                data = json.loads(json_text)
+                break
+            except json.JSONDecodeError as e:
+                if e.msg == "Extra data":
+                    # {"ret":0,"msg":"ok",...}{"ret":-5507,"msg":"很抱歉，系统繁忙，请等待10秒后再试！"...}
+                    logger.debug(
+                        f"道聚城似乎又抽风了，末尾多加了一个json串，尝试移除最后一个左括号及之后的内容，修改前 json_text 为 {json_text}"
+                    )
+                    json_text = json_text[: json_text.rindex("{")]
+                    logger.debug(f"修改后 json_text 为 {json_text}")
+                else:
+                    # 其他情况则继续抛出异常
+                    raise e
 
     success = is_request_ok(data)
 
@@ -277,7 +372,7 @@ def is_request_ok(data) -> bool:
                     # 特殊处理 status
                     val = data[key]
                     if key == "status":
-                        if type(val) is str and not val.isnumeric():
+                        if type(val) is str and not val.isdigit():
                             success = False
                         else:
                             success = int(val) in [0, 1, 200]
@@ -330,6 +425,9 @@ def jsonp2json(jsonpStr, is_normal_jsonp=True, need_unquote=True) -> dict:
 
 
 def pretty_json(data, pretty=False, need_unquote=True) -> str:
+    if data is None:
+        return str(data)
+
     if pretty:
         jsonStr = json.dumps(data, ensure_ascii=False, indent=2)
     else:

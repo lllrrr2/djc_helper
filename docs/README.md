@@ -20,7 +20,7 @@
   <span> | </span>
   <a href="https://space.bilibili.com/1851177">B站视频教程</a>
   <span> | </span>
-  <a href="http://114.132.252.185:5244/%E6%96%87%E6%9C%AC%E7%BC%96%E8%BE%91%E5%99%A8%E3%80%81chrome%E6%B5%8F%E8%A7%88%E5%99%A8%E3%80%81autojs%E3%80%81HttpCanary%E7%AD%89%E5%B0%8F%E5%B7%A5%E5%85%B7">小工具</a>
+  <a href="http://101.43.54.94:5244/%E6%96%87%E6%9C%AC%E7%BC%96%E8%BE%91%E5%99%A8%E3%80%81chrome%E6%B5%8F%E8%A7%88%E5%99%A8%E3%80%81autojs%E3%80%81HttpCanary%E7%AD%89%E5%B0%8F%E5%B7%A5%E5%85%B7">小工具</a>
 </div>
 
 <br>
@@ -251,7 +251,7 @@ DNF蚊子腿小助手10群 791343073 <br>
 请查看【使用教程/使用文档.docx】
 
 # 支持一下
-[![支持一下](https://s3.ax1x.com/2020/12/16/r1yWZT.png)](https://imgchr.com/i/r1yWZT)
+https://docs.qq.com/doc/DYnRISFNOdW12VGZG
 
 # 历史 Star 数
 <p align="center">

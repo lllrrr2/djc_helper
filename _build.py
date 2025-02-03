@@ -24,12 +24,15 @@ def build(disable_douban=False, enable_proxy=False, use_upx=True):
     # 确保test.py内容为空，避免出现异常状况
     if os.path.isfile("test.py") and os.stat("test.py").st_size != 0:
         with open("test.py", encoding="utf-8") as f:
-            async_message_box(f"test.py内容不为空，未避免构建过程中执行产生副作用，将清空其内容，其内容如下:\n\n{f.read()}", "警告：test.py的测试代码未移除")
+            async_message_box(
+                f"test.py内容不为空，未避免构建过程中执行产生副作用，将清空其内容，其内容如下:\n\n{f.read()}",
+                "警告：test.py的测试代码未移除",
+            )
 
         clear_file("test.py")
 
     # 初始化venv和依赖
-    init_venv_and_requirements(".venv", "requirements.txt", disable_douban, enable_proxy)
+    init_venv_and_requirements(".venv", "requirements.txt", disable_douban, enable_proxy, False)
 
     show_head_line("将使用.venv环境进行编译", color("bold_yellow"))
 
@@ -58,7 +61,10 @@ def build(disable_douban=False, enable_proxy=False, use_upx=True):
             "platforms/qwebgl.dll",
         ],
     }
-    logger.info(color("bold_green") + f"开始编译前先尝试移动这些确定用不到的库文件到临时目录 {temp_remove_file_dir}，从而尽可能减少最终编译的大小")
+    logger.info(
+        color("bold_green")
+        + f"开始编译前先尝试移动这些确定用不到的库文件到临时目录 {temp_remove_file_dir}，从而尽可能减少最终编译的大小"
+    )
     for parent_directory, file_or_directory_name_list in dep_files_to_remove_during_build.items():
         for file_or_directory_name in file_or_directory_name_list:
             path = os.path.join(site_packages_path, parent_directory, file_or_directory_name)
@@ -76,22 +82,22 @@ def build(disable_douban=False, enable_proxy=False, use_upx=True):
             shutil.move(path, backup_path)
 
     # 实际编译流程
-    build_configs = [
-        ("main.py", "DNF蚊子腿小助手.exe", "utils/icons/DNF蚊子腿小助手.ico", ".", [], []),
-        ("config_ui.py", "DNF蚊子腿小助手配置工具.exe", "utils/icons/config_ui.ico", ".", [], ["--noconsole"]),
-        ("auto_updater.py", "auto_updater.exe", "", "utils", ["PyQt5"], []),
-        # ("my_home_special_version.py", "DNF蚊子腿小助手_我的小屋特别版.exe", "utils/icons/my_home.ico", ".", ["PyQt5"], []),
+    build_configs: list[tuple[str, str, str, str, list[str], list[str], list[str]]] = [
+        ("main.py", "DNF蚊子腿小助手.exe", "utils/icons/DNF蚊子腿小助手.ico", ".", [], [], []),
+        ("config_ui.py", "DNF蚊子腿小助手配置工具.exe", "utils/icons/config_ui.ico", ".", [], ["--noconsole"], []),
+        ("auto_updater.py", "auto_updater.exe", "", "utils", ["PyQt5"], [], []),
+        # ("my_home_special_version.py", "DNF蚊子腿小助手_我的小屋特别版.exe", "utils/icons/my_home.ico", ".", ["PyQt5"], [], []),
     ]
 
     # ark_icon = "utils/icons/ark_lottery_special_version.ico"
     # build_configs.append(
-    #     ("ark_lottery_special_version.py", "DNF蚊子腿小助手_集卡特别版.exe", ark_icon, ".", ["PyQt5"], []),
+    #     ("ark_lottery_special_version.py", "DNF蚊子腿小助手_集卡特别版.exe", ark_icon, ".", ["PyQt5"], [], []),
     # )
 
     for idx, config in enumerate(build_configs):
         prefix = f"{idx + 1}/{len(build_configs)}"
 
-        src_path, exe_name, icon_path, target_dir, exclude_modules, extra_args = config
+        src_path, exe_name, icon_path, target_dir, exclude_modules, extra_args, hidden_import_list = config
         logger.info(color("bold_yellow") + f"{prefix} 开始编译 {exe_name}")
 
         cmd_build = [
@@ -108,6 +114,9 @@ def build(disable_douban=False, enable_proxy=False, use_upx=True):
         if use_upx:
             cmd_build.extend(["--upx-dir", "utils"])
         cmd_build.extend(extra_args)
+        if len(hidden_import_list) > 0:
+            for hidden_import in hidden_import_list:
+                cmd_build.extend(["--hidden-import", hidden_import])
 
         logger.info(f"{prefix} 开始编译 {exe_name}，命令为：{' '.join(cmd_build)}")
         subprocess.call(cmd_build)

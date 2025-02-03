@@ -3,8 +3,8 @@
 #   大版本号：大重构、或者引入很重要的改动时
 #   小版本号：新的活动周期，比如国庆节版本、春节版本
 #   补丁版本号：修复bug，或者同一个活动周期内出的新活动
-now_version = "19.4.7"
-ver_time = "2023.2.8"
+now_version = "22.4.2"
+ver_time = "2025.1.26"
 author = "风之凌殇"
 
 
@@ -12,8 +12,6 @@ author = "风之凌殇"
 def print_current_version_for_changelog():
     print(f"# v{now_version} {ver_time}")
 
-
-# UNDONE: 可以使用 changelog_number.py 脚本来自动格式化更新日志中的序号
 
 if __name__ == "__main__":
     print_current_version_for_changelog()

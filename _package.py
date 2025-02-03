@@ -1,17 +1,18 @@
 # 构建发布压缩包
+from __future__ import annotations
+
 import os
-import pathlib
-import re
 import shutil
 
 from compress import compress_dir_with_bandizip
-from const import db_top_dir
 from log import color, logger
-from util import human_readable_size, show_head_line
+from util import human_readable_size, make_sure_dir_exists, show_head_line
 from version import now_version
 
 
-def package(dir_src, dir_all_release, release_dir_name, release_7z_name, dir_github_action_artifact):
+def package(
+    dir_src: str, dir_all_release: str, release_dir_name: str, release_7z_name: str, dir_github_action_artifact: str
+):
     old_cwd = os.getcwd()
 
     show_head_line(f"开始打包 {release_dir_name} 所需内容", color("bold_yellow"))
@@ -26,32 +27,38 @@ def package(dir_src, dir_all_release, release_dir_name, release_7z_name, dir_git
 
     logger.info(color("bold_yellow") + f"将部分内容从 {dir_src} 复制到 {dir_current_release} ")
     # 需要复制的文件与目录
-    files_to_copy = []
-    # 基于正则确定初始复制范围
-    reg_wantted_file = r".*\.(toml|md|txt|png|jpg|docx|url)$"
-    for file in os.listdir("."):
-        if not re.search(reg_wantted_file, file, flags=re.IGNORECASE):
-            continue
-        files_to_copy.append(file)
-    # 额外补充一些文件和目录
-    files_to_copy.extend(
-        [
-            "config.example.toml",
-            "DNF蚊子腿小助手.exe",
-            "DNF蚊子腿小助手配置工具.exe",
-            "DNF蚊子腿小助手配置文件.bat",
-            "使用教程",
-            "付费指引",
-            "相关信息",
-            "utils",
-        ]
-    )
+    files_to_copy = [
+        # 最外层文件
+        "config.toml",
+        "config.example.toml",
+        "DNF蚊子腿小助手.exe",
+        "DNF蚊子腿小助手配置工具.exe",
+        "DNF蚊子腿小助手交流群群二维码.png",
+        # 复制完后要移动或重命名到其他路径的文件
+        "CHANGELOG.MD",
+        "README.MD",
+        "utils/auto_updater.exe",
+        # 其他文件
+        "使用教程",
+        "付费指引",
+        "相关信息",
+        "utils/bandizip_portable",
+        "utils/icons",
+        "utils/reference_data",
+        "utils/auto_updater_changelog.MD",
+        "utils/hdiffz.exe",
+        "utils/hpatchz.exe",
+        "utils/不要下载增量更新文件_这个是给自动更新工具使用的.txt",
+    ]
     # 按顺序复制
     files_to_copy = sorted(files_to_copy)
     # 复制文件与目录过去
     for filename in files_to_copy:
         source = os.path.join(dir_src, filename)
         destination = os.path.join(dir_current_release, filename)
+
+        make_sure_dir_exists(os.path.dirname(destination))
+
         if os.path.isdir(filename):
             logger.info(f"拷贝目录 {filename}")
             shutil.copytree(source, destination)
@@ -74,24 +81,11 @@ def package(dir_src, dir_all_release, release_dir_name, release_7z_name, dir_git
 
     logger.info(color("bold_yellow") + "清除一些无需发布的内容")
     dir_to_filenames_need_remove = {
-        ".": [
-            *list(path.name for path in pathlib.Path(".").glob("requirements*.txt")),
-            "config.toml.local",
-            "config.cloud.toml",
-            *list(path.name for path in pathlib.Path(".").glob("config.toml.github_action*")),
+        "使用教程": [
+            "使用文档.docx",
         ],
-        "utils": [
-            "logs",
-            db_top_dir,
-            ".cached",
-            ".first_run",
-            ".log.filename",
-            "buy_auto_updater_users.txt",
-            "user_monthly_pay_info.txt",
-            "notices.txt",
-            "notice_archived.txt",
-            *list(path.name for path in pathlib.Path("utils").glob("chrome_portable_*")),
-            "upx.exe",
+        "付费指引": [
+            "付费指引.docx",
         ],
     }
     for dir_path, filenames in dir_to_filenames_need_remove.items():
@@ -117,7 +111,9 @@ def package(dir_src, dir_all_release, release_dir_name, release_7z_name, dir_git
 
     # 打印最终大小
     filesize = os.path.getsize(release_7z_name)
-    logger.info(color("bold_green") + f"打包结束，最终大小为{human_readable_size(filesize)}，最终路径为 {release_7z_name}")
+    logger.info(
+        color("bold_green") + f"打包结束，最终大小为{human_readable_size(filesize)}，最终路径为 {release_7z_name}"
+    )
 
     os.chdir(old_cwd)
 

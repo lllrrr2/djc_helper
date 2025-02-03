@@ -36,39 +36,65 @@ class GameRoleInfo(ConfigInterface):
 class RoleInfo(ConfigInterface):
     def __init__(self):
         # 端游
-        self.accountId = "71672841"
-        self.areaID = "30"
-        self.areaName = "浙江"
-        self.bizCode = "dnf"
-        self.ext_param = ""
-        self.gameName = "地下城与勇士"
-        self.isHasService = "1"
+        # dnf
         self.roleCode = "71672841"
         self.roleName = "风之凌殇呀"
+        self.systemKey = ""
+        self.systemID = "1"
         self.serviceID = "11"
         self.serviceName = "浙江一区"
-        self.systemID = "1"
-        self.systemKey = ""
+        self.channelName = ""
+        self.channelID = ""
+        self.channelKey = ""
+        self.areaName = "浙江"
+        self.areaID = "30"
+        self.gameName = "地下城与勇士"
+        self.bizCode = "dnf"
+        self.showAreaName = ""
+        self.accountId = "71672841"
         self.type = "0"
+        self.isHasService = "1"
+
+        # 命运方舟
+        # self.roleCode = "5000000000004678510"
+        # self.roleName = "风之凌殇"
+        # self.systemKey = "pc"
+        # self.systemID = "2"
+        # self.serviceID = ""
+        # self.serviceName = "卢佩恩"
+        # self.channelName = "卢佩恩"
+        # self.channelID = "50"
+        # self.channelKey = ""
+        # self.areaName = "卡丹"
+        # self.areaID = "4"
+        # self.gameName = "命运方舟"
+        # self.bizCode = "fz"
+        # self.showAreaName = "卡丹"
+        # self.type = 0
+        # self.isHasService = 0
+        self.version = 3
+        self.area = "50"
+        self.platid = "2"
+        self.partition = "4"
 
         # 手游
-        # self.accountId = "2814890506666666666"
-        # self.areaID = "20001"
-        # self.areaName = "梦江南"
-        # self.bizCode = "jx3"
-        self.channelID = "2"
-        self.channelKey = "qq"
-        self.channelName = "手Q"
-        # self.ext_param = ""
-        # self.gameName = "剑网3:指尖江湖"
-        # self.isHasService = "0"
-        # self.roleCode = "2814890506666666666"
+        # self.roleCode = "2814890504594928763"
         # self.roleName = "风之凌殇"
+        # self.systemKey = "android"
+        # self.systemID = "1"
         # self.serviceID = "20001"
         # self.serviceName = "梦江南"
-        # self.systemID = "1"
-        # self.systemKey = "android"
+        # self.channelName = "手Q"
+        # self.channelID = "2"
+        # self.channelKey = "qq"
+        # self.areaName = "梦江南"
+        # self.areaID = "20001"
+        # self.gameName = "剑网3:指尖江湖"
+        # self.bizCode = "jx3"
+        # self.showAreaName = ""
+        # self.accountId = "2814890504594928763"
         # self.type = "1"
+        # self.isHasService = "0"
 
     def clone(self) -> RoleInfo:
         return RoleInfo().auto_update_config(to_raw_type(self))
@@ -136,7 +162,7 @@ class GoodsValiDateInfo(ConfigInterface):
         self.left = "0"
         self.bought = "0"
         self.todayBought = 0
-        self.award = {"list": []}
+        self.award: dict[str, list] = {"list": []}
         self.isFunc = 0
         self.beanCut = 0
         self.maxBeanCutPrice = 0
@@ -159,11 +185,27 @@ class GoodsCategoryInfo(ConfigInterface):
         self.subCategory = "0"
 
 
-class DnfRoleInfo(DaoObject):
-    def __init__(self, roleid, rolename, forceid, level):
+class DnfRoleInfoList(ConfigInterface):
+    def __init__(self):
+        self.role_list: list[DnfRoleInfo] = []
+
+    def fields_to_fill(self):
+        return [
+            ("role_list", DnfRoleInfo),
+        ]
+
+
+class DnfRoleInfo(ConfigInterface):
+    def __init__(self):
+        self.roleid = "0"
+        self.rolename = "风之凌殇"
+        # 已知：0-男鬼剑，3-女魔法师，13-男枪士，14-女圣职者
+        self.forceid = 0
+        self.level = 110
+
+    def update_params(self, roleid: str, rolename: str, forceid: str, level: str):
         self.roleid = str(roleid)
         self.rolename = str(rolename)
-        # 已知：0-男鬼剑，3-女魔法师，13-男枪士，14-女圣职者
         self.forceid = int(forceid)
         self.level = int(level)
 
@@ -216,20 +258,23 @@ XIN_YUE_MIN_LEVEL = 3
 
 
 class XinYueInfo(DaoObject):
+    SPECIAL_MEMBER_LEVEL = 10
+
     level_to_name = {
-        "1": "游戏家",
-        "2": "游戏家Pro",
-        "3": "心悦VIP1",
-        "4": "心悦VIP2",
-        "5": "心悦VIP3",
-        "6": "心悦VIP4",
-        "7": "心悦VIP5",
+        1: "游戏家",
+        2: "游戏家PRO",
+        3: "心悦VIP1",
+        4: "心悦VIP2",
+        5: "心悦VIP3",
+        6: "心悦VIP4",
+        7: "心悦VIP5",
+        SPECIAL_MEMBER_LEVEL: "特邀会员",
     }
 
     def __init__(self):
         # 等级含义见上述描述
         self.xytype = 1
-        self.xytype_str = "游戏家G1"
+        self.xytype_str = "获取失败"
         # 特邀会员
         self.is_special_member = False
         # 勇士币
@@ -263,6 +308,13 @@ class XinYueInfo(DaoObject):
 
     def is_xinyue_or_special_member(self) -> bool:
         return self.xytype >= XIN_YUE_MIN_LEVEL or self.is_special_member
+
+    def is_xinyue_level(self, *levels: int) -> bool:
+        for level in levels:
+            if self.xytype == XIN_YUE_MIN_LEVEL + level - 1:
+                return True
+
+        return False
 
 
 class XinYueItemInfo(DaoObject):
@@ -298,25 +350,61 @@ class XinYueItemInfo(DaoObject):
         self.used_refresh = used_refresh
 
 
-class XinYueTeamInfo(ConfigInterface):
+class XinYueMyTeamInfo(ConfigInterface):
     def __init__(self):
-        self.result = 0
-        self.id = ""
-        self.award_summary = "大大小|小中大"
-        self.members: list[XinYueTeamMember] = []
+        self.ret = 0
+        self.num = 0
+        self.list: list[XinYueTeamMember] = []
+        self.teamAllOpenId = ""  # "1054073896,qq_2"
+
+        # self.result = 0
+        # self.id = "" # note:新版的这个id需要通过查询 131104（自己队伍ID） 来获取
+        # self.award_summary = "大大小|小中大"
+        # self.members: list[XinYueTeamMember] = []
+
+    def fields_to_fill(self):
+        return [
+            ("list", XinYueTeamMember),
+        ]
 
     def is_team_full(self) -> bool:
-        return len(self.members) == 2
+        return self.num == 2
 
 
 class XinYueTeamMember(ConfigInterface):
     def __init__(self):
-        self.headurl = "http://thirdqq.qlogo.cn/g?b=oidb&k=KJKNiasFOwe0EGjTyHI7CLg&s=640&t=1556481203"
-        self.nickname = "%E6%9C%88%E4%B9%8B%E7%8E%84%E6%AE%87"
-        self.qq = ""
-        self.captain = 0
-        self.pak = ""
-        self.code = ""
+        self.activityId = "15488"
+        self.teamId = 166396
+        self.isCaptain = 1
+        self.avatar = "http://thirdqq.qlogo.cn/ek_qqapp/AQWLTKahHNrg5aEvmT7Y1ySCaia3aCJmJjicmcib1xYGR85uY9jTCAeNiaIHhHCAPYtApfXdoBMQ/40"
+        self.nickName = "%E9%A3%8E%E4%B9%8B%E5%87%8C%E6%AE%87"
+        self.uid = "1054073896"
+        self.role = {
+            "area_id": 11,
+            "partition_id": 11,
+            "role_id": "71672841",
+            "role_name": "",
+            "plat_id": 2,
+            "game_openid": "1054073896",
+            "g_openid": "",
+            "game_appid": "",
+            "device": "pc",
+        }
+
+        # self.headurl = "http://thirdqq.qlogo.cn/g?b=oidb&k=KJKNiasFOwe0EGjTyHI7CLg&s=640&t=1556481203"
+        # self.nickname = "%E6%9C%88%E4%B9%8B%E7%8E%84%E6%AE%87"
+        # self.qq = ""
+        # self.captain = 0
+        # self.pak = ""
+        # self.code = ""
+
+
+class XinYueSummaryTeamInfo(ConfigInterface):
+    def __init__(self):
+        self.teamCode = "DNF_TEAM_NOT_FOUND"
+        self.teamName = "%E9%A3%8E%E4%B9%8B%E5%87%8C%E6%AE%87"
+        self.teamLimit = 2
+        self.teamMemberNum = 2
 
 
 class SailiyamWorkInfo(ConfigInterface):
@@ -639,13 +727,15 @@ class DnfHelperChronicleUserActivityTopInfo(ConfigInterface):
         self.currentExp = 0
         self.levelExp = 5
         self.giftImage = "https://mcdn.gtimg.com/bbcdn/dnf/Scorereward/sLbPic2/icons/202011262233235fbfbcb30af65.png"
+        self.isClose = False
+        self.signCardNum = "3"
 
-    def get_level_info_and_points_to_show(self) -> tuple[str, str]:
+    def get_level_info_and_points_to_show(self) -> tuple[str, int]:
         levelInfo = f"LV{self.level}({self.currentExp}/{self.levelExp})"
         chronicle_points = self.point
         if self.totalExp == 0:
             levelInfo = ""
-            chronicle_points = ""
+            chronicle_points = 0
 
         return levelInfo, chronicle_points
 
@@ -656,10 +746,28 @@ class DnfHelperChronicleUserActivityTopInfo(ConfigInterface):
 class DnfHelperChronicleUserTaskList(ConfigInterface):
     def __init__(self):
         self.pUserId = ""
-        self.mIcon = "http://q.qlogo.cn/qqapp/1104466820/0E82A1DBAE746043CF3AEF95EC39FC2B/100"
-        self.pIcon = ""
+        self.pEncodeUserId = "ab1a9a478692"
+        self.pNickname = "风之凌殇（私聊这个号）"
+        self.mNickname = "风之凌殇"
+        self.mIcon = "http://q.qlogo.cn/qqapp/1104466820/8F5DF4AB0D1CBAC3281E8549D6334034/100"
+        self.pIcon = "https://q.qlogo.cn/qqapp/1105742785/FF795385EA973689A70CAD79514374D3/100"
         self.hasPartner = False
+        self.hasRedDot = False
+        self.isTip = False
         self.taskList: list[DnfHelperChronicleUserTaskInfo] = []
+
+    def get_partner_info(self, dnf_helper_info) -> str:
+        from config import DnfHelperInfoConfig
+
+        dnf_helper_info: DnfHelperInfoConfig  # type: ignore
+
+        partner_name = ""
+        if dnf_helper_info.pNickName != "":
+            partner_name += f"{dnf_helper_info.pNickName}-本地匹配"
+        elif dnf_helper_info.enable_auto_match_dnf_chronicle:
+            partner_name += f"{self.pNickname}-自动匹配"
+
+        return partner_name
 
     def fields_to_fill(self):
         return [
@@ -949,7 +1057,9 @@ class BuyInfo(ConfigInterface):
         msg += "\n"
         msg += "\n通过配置工具直接购买或者使用卡密购买，无需私聊告知，等待10到20分钟左右后即可到账。目前有缓存机制，可能不能及时查询到最新信息~"
         msg += "\n"
-        msg += "\n如果是扫【DLC付款码.png】付款的，请私聊 【付款信息、购买内容、需要使用的所有QQ】给我的小号【1870465547】"
+        msg += (
+            "\n如果是扫【DLC付款码.png】付款的，请私聊 【付款信息、购买内容、需要使用的所有QQ】给我的小号【1870465547】"
+        )
         msg += "\n出于效率和QQ被冻结风险的综合考量，不会回复QQ私聊。一般每天会统一处理一到两次，届时看到你的私聊时肯定会处理"
         msg += "\n如果私聊一天（24小时）后仍未看到对应充值记录，可以私聊我提醒下，看到肯定会处理的"
 
@@ -1132,8 +1242,8 @@ class IdeActionInfo(ConfigInterface):
         from urls import not_know_end_time____, not_know_start_time__
 
         self.sName = "无法获取活动名称"
-        self.sUpDate = not_know_start_time__
-        self.sDownDate = not_know_end_time____
+        self.sUpDate: str = not_know_start_time__
+        self.sDownDate: str = not_know_end_time____
 
 
 class IdeFlowInfo(ConfigInterface):
@@ -1379,6 +1489,36 @@ class GuanjiaNewLotteryResultData(ConfigInterface):
         self.tips = ""
         self.spaBonus = ""
         self.comment = "抗疲劳秘药(5点)（LV80-100)*1"
+
+
+class ColgBattlePassQueryInfo(ConfigInterface):
+    def __init__(self):
+        # 兑换币
+        self.cm_token = 0
+        # 商城链接
+        self.cmall_url = ""
+        # 活跃值
+        self.user_credit = 0
+        # 奖励列表
+        self.user_reward_list: list[ColgBattlePassRewardInfo] = []
+        # 任务列表
+        self.user_task_list = ColgBattlePassUserTaskList()
+
+    def fields_to_fill(self) -> list[tuple[str, type[ConfigInterface]]]:
+        return [
+            ("user_reward_list", ColgBattlePassRewardInfo),
+        ]
+
+
+class ColgBattlePassUserTaskList(ConfigInterface):
+    def __init__(self):
+        # 任务列表
+        self.list: list[ColgBattlePassTaskInfo] = []
+
+    def fields_to_fill(self) -> list[tuple[str, type[ConfigInterface]]]:
+        return [
+            ("list", ColgBattlePassTaskInfo),
+        ]
 
 
 class ColgBattlePassInfo(ConfigInterface):
@@ -1663,36 +1803,47 @@ class GuanJiaUserInfo(ConfigInterface):
 
 class XinYueTeamAwardInfo(ConfigInterface):
     def __init__(self):
-        self.dtGetPackageTime = "2021-10-29 21:32:38"
-        self.iBroadcastFlag = "0"
-        self.iChildModuleId = "0"
-        self.iModuleId = "397009"
-        self.iPackageGroupId = "1537766"
-        self.iPackageId = "2374025"
-        self.iPackageNum = "1"
-        self.iPackagePrice = "5000"
-        self.iStatus = "2"
-        self.id = "69353284"
-        self.jIdipExtendReplace = ""
-        self.sAreaName = "浙江一区"
-        self.sCdkey = ""
-        self.sExtend1 = "11"
-        self.sExtend2 = ""
-        self.sExtend3 = "490022110"
-        self.sExtend4 = ""
-        self.sExtend5 = ""
-        self.sGender = "11"
-        self.sItemType = "11"
-        self.sMediacySerial = ""
-        self.sPackageName = "装备提升礼盒"
-        self.sPlatId = "0"
-        self.sRelativeIps = ""
-        self.sRoleArea = "11"
-        self.sRoleId = ""
-        self.sRoleName = ""
-        self.sRolePartition = "11"
-        self.sSerialNum = "AMS-TGCLUB-1029213238-N4BKmM-366480-747693"
-        self.sUin = ""
+        self.partition_name = "5rWZ5rGf5LiA5Yy6"
+        self.role_name = "6aOO5LmL5YeM5q6H5ZGA"
+        self.gift_name = "高级运镖令奖励"
+        self.created = "1703615940"
+        self.gift_time = "2023-12-27 02:39:00"
+        self.package_real_flag = "0"
+        self.id = "1231500205"
+        self.gift_id = "4748280"
+        self.package_cdkey = ""
+        self.req_serial = "sm-cm5hrgo7n68iksapqlrg"
+
+        # self.dtGetPackageTime = "2021-10-29 21:32:38"
+        # self.iBroadcastFlag = "0"
+        # self.iChildModuleId = "0"
+        # self.iModuleId = "397009"
+        # self.iPackageGroupId = "1537766"
+        # self.iPackageId = "2374025"
+        # self.iPackageNum = "1"
+        # self.iPackagePrice = "5000"
+        # self.iStatus = "2"
+        # self.id = "69353284"
+        # self.jIdipExtendReplace = ""
+        # self.sAreaName = "浙江一区"
+        # self.sCdkey = ""
+        # self.sExtend1 = "11"
+        # self.sExtend2 = ""
+        # self.sExtend3 = "490022110"
+        # self.sExtend4 = ""
+        # self.sExtend5 = ""
+        # self.sGender = "11"
+        # self.sItemType = "11"
+        # self.sMediacySerial = ""
+        # self.sPackageName = "装备提升礼盒"
+        # self.sPlatId = "0"
+        # self.sRelativeIps = ""
+        # self.sRoleArea = "11"
+        # self.sRoleId = ""
+        # self.sRoleName = ""
+        # self.sRolePartition = "11"
+        # self.sSerialNum = "AMS-TGCLUB-1029213238-N4BKmM-366480-747693"
+        # self.sUin = ""
 
 
 class XinYueTeamGroupInfo(ConfigInterface):
@@ -1867,19 +2018,33 @@ class MoJieRenHoldItem(ConfigInterface):
         self.arrExtData = {}
 
 
+card_id_to_action_id = {
+    0: "566",
+    1: "565",
+    2: "564",
+    3: "567",
+    4: "568",
+}
+
+
 class MaJieLuoInfo(ConfigInterface):
     def __init__(self):
         self.iRet = "0"
         self.sMsg = "ok"
+        self.luckCard = "0"
+        self.hitCard = "0"
+        self.itemInfo = []
+        self.totalCard = None
+        self.isLuck = "1"
+        self.itemUin = "1054073896"
+        self.isAuth = "1"
         self.jHolds = {}
-        self.iLogined = "1"
-        self.iSend = "0"
-        self.iOpen = "0"
-        self.iDrawed = "0"
-        self.iDraw = "0"
-        self.iFuqi = "40"
-        self.iPassed = "0"
-        self.iLuck = "0"
+        self.isLogin = 1
+        self.isLive = 0
+        self.iPass = "0"
+        self.isBakar = "0"
+        self.isDimensional = "0"
+        self.isNightmare = "0"
 
 
 class VoteWorkList(ConfigInterface):
@@ -2155,6 +2320,191 @@ class LuckyUserTaskPackFlow(ConfigInterface):
         self.pointStatus = "1"
         self.rData = '{"iRet":0,"sMsg":"恭喜您获得了礼包： 共鸣的先兆水晶*15个 ","iPackageGroupId":"2130615","iPackageId":"3293528","iPackageNum":"1","sPackageName":"共鸣的先兆水晶*15个","sAmsSerialNum":"AMS-DNF-0711103143-Wqeapt-98250-98627"}'
         self.uid = "19010"
+
+
+class XinYueBgwUserInfo(ConfigInterface):
+    def __init__(self):
+        self.gfen = 4441
+        self.mobile = ""
+        self.nickname = "风之凌殇"
+        self.point = 23315
+        self.type = 2
+        self.gender = 1
+        self.headimgurl = "http://thirdqq.qlogo.cn/ek_qqapp/AQWLTKahHNrg5aEvmT7Y1ySCaia3aCJmJjicmcib1xYGR85uY9jTCAeNiaIHhHCAPYtApfXdoBMQ/100"
+        self.country = "中国"
+        self.province = "广东"
+
+
+class ComicDataList(ConfigInterface):
+    """额外封装一层，方便cache时序列化"""
+
+    def __init__(self):
+        self.comic_list: list[ComicData] = []
+
+    def fields_to_fill(self) -> list[tuple[str, type[ConfigInterface]]]:
+        return [
+            ("comic_list", ComicData),
+        ]
+
+    def get_current_update_progress(self) -> int:
+        """获取当前更新进度"""
+        update_count = 0
+        for comic in self.comic_list:
+            if comic.has_updated():
+                update_count += 1
+
+        return update_count
+
+
+class ComicData(ConfigInterface):
+    def __init__(self):
+        self.id = "1"
+        self.updateStatus = "1"
+        self.comicUrl = "https://ac.qq.com/ComicView/index/id/654947/seqno/2"
+
+    def has_updated(self) -> bool:
+        return self.updateStatus == "1"
+
+
+class ShenJieGrowUpInfo(ConfigInterface):
+    def __init__(self):
+        self.curStageData = ShenJieGrowUpCurStageData()
+        self.allStagePack: list[ShenJieGrowUpStagePack] = []
+        self.taskData: dict[str, ShenJieGrowUpTaskData] = {}
+
+    def fields_to_fill(self) -> list[tuple[str, type[ConfigInterface]]]:
+        return [
+            ("allStagePack", ShenJieGrowUpStagePack),
+        ]
+
+    def dict_fields_to_fill(self) -> list[tuple[str, type[ConfigInterface]]]:
+        return [("taskData", ShenJieGrowUpTaskData)]
+
+
+class ShenJieGrowUpCurStageData(ConfigInterface):
+    def __init__(self):
+        self.id = "233464"
+        self.iUin = "1054073896"
+        self.iAreaId = "11"
+        self.sRoleId = "45230145"
+        self.sRoleName = "%25E9%25A3%258E%25E4%25B9%258B%25E5%2587%258C%25E6%25AE%2587%25E5%2596%25B5"
+        self.roleJob = "350"
+        self.stage = "2"
+        self.stageTask = "0"
+        self.stagePack = "0"
+        self.task1 = "0"
+        self.task2 = "0"
+        self.task3 = "0"
+        self.task4 = "0"
+        self.task5 = "0"
+        self.lastTaskDoneTime = "1970-01-01 00:00:00"
+        self.initDateTime = "2024-02-08 00:00:18"
+        self.initPeriodSday = "20240208"
+
+
+class ShenJieGrowUpStagePack(ConfigInterface):
+    def __init__(self):
+        self.stage = "2"
+        self.packStatus = 0
+
+
+class ShenJieGrowUpTaskData(ConfigInterface):
+    def __init__(self):
+        self.doneNum = 0
+        self.needNum = 1
+        self.giftStatus = "0"
+
+
+class XinYueBattleGroundWpeGetBindRoleResult(ConfigInterface):
+    def __init__(self):
+        self.ret = 0
+        self.msg = ""
+        self.roles: list[XinYueBattleGroundWpeBindRole] = []
+        self.next_page_no = -1
+        self.game_info = None
+
+    def fields_to_fill(self) -> list[tuple[str, type[ConfigInterface]]]:
+        return [
+            ("roles", XinYueBattleGroundWpeBindRole),
+        ]
+
+
+class XinYueBattleGroundWpeBindRole(ConfigInterface):
+    def __init__(self):
+        self.game_open_id = "1054073896"
+        self.game_app_id = ""
+        self.area_id = 11
+        self.plat_id = 2
+        self.partition_id = 11
+        self.partition_name = "5rWZ5rGf5LiA5Yy6"
+        self.role_id = "45230145"
+        self.role_name = "6aOO5LmL5YeM5q6H5Za1"
+        self.device = "pc"
+
+
+class SoulStoneResponse(ConfigInterface):
+    def __init__(self):
+        self.result = 0
+        self.returnCode = 0
+        self.returnMsg = ""
+        self.data = SoulStoneInfo()
+
+
+class SoulStoneInfo(ConfigInterface):
+    def __init__(self):
+        self.emulatorPropTitle = "暗淡的灵魂石"
+        self.currLevel = 3
+        self.highestLevel = 3
+        self.nextSuccRate = "50%"
+        self.remainUpgradeCount = 3
+        self.upgradedCount = 3
+        self.upgradeLevelPickupStatus: list[int] = []
+        self.upgradeCountPickupStatus: list[int] = []
+        self.rankingPickupStatus = 0
+        self.pointExchangeRemainTimes = 4
+        self.taskCmptIds = [1, 2]
+        self.taskAwardPickupIds = [1, 2]
+        self.upgradePropAwardConfig: list[SoulStoneUpgradeLevelAward] = []
+        self.upgradeCountAwardConfig: list[SoulStoneUpgradeCountAward] = []
+        # self.flows: dict[str, AmsActFlowInfo] = {}  # flowid => info
+        self.taskConfig: dict[str, SoulStoneTask] = {}  # taskid => task
+        self.pointExchangeConfig = {"exchangeRate": 2, "dailyLimit": 4}
+        self.userInfo = {}
+
+    def fields_to_fill(self) -> list[tuple[str, type[ConfigInterface]]]:
+        return [
+            ("upgradePropAwardConfig", SoulStoneUpgradeLevelAward),
+            ("upgradeCountAwardConfig", SoulStoneUpgradeCountAward),
+        ]
+
+    def dict_fields_to_fill(self) -> list[tuple[str, type[ConfigInterface]]]:
+        return [("taskConfig", SoulStoneTask)]
+
+
+class SoulStoneUpgradeLevelAward(ConfigInterface):
+    def __init__(self):
+        self.propId = 1
+        self.propName = "灵魂武器袖珍罐"
+        self.pic = "https://cdn.dzhu.qq.com/icon/20241217101855202.png"
+        self.level = 10
+        self.amsId = "IEGAMS-689863-657792-3647374"
+        self.num = 1
+
+
+class SoulStoneUpgradeCountAward(ConfigInterface):
+    def __init__(self):
+        self.propId = 1
+        self.propName = "复活币礼盒 (1个)"
+        self.pic = "https://cdn.dzhu.qq.com/button/20241217102304912.png"
+        self.count = 5
+        self.amsId = "IEGAMS-689863-657792-3647405"
+        self.num = 5
+
+
+class SoulStoneTask(ConfigInterface):
+    def __init__(self):
+        self.title = "每日参与活动"
+        self.upgradeTimes = 1
 
 
 if __name__ == "__main__":

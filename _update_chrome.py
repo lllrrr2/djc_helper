@@ -14,46 +14,32 @@ from compress import compress_dir_with_bandizip, decompress_dir_with_bandizip
 from download import download_file
 from log import color, logger
 from update import version_to_version_int_list
-from util import change_console_window_mode_async, make_sure_dir_exists, pause, remove_directory, remove_file
+from util import (
+    change_console_window_mode_async,
+    download_chrome_driver,
+    make_sure_dir_exists,
+    parse_major_version,
+    pause,
+    remove_directory,
+    remove_file,
+    show_head_line,
+    try_except,
+)
 
 TEMP_DIR = "utils/chrome_temporary_dir"
 SRC_DIR = os.path.realpath(".")
 
-CHROME_DRIVER_EXE = "chromedriver.exe"
-
 
 def download_latest_chrome_driver():
     latest_version = get_latest_chrome_driver_version()
-    windows_zip = "chromedriver_win32.zip"
 
-    latest_download_url = f"https://chromedriver.storage.googleapis.com/{latest_version}/{windows_zip}"
-
-    logger.info(f"最新版本的chrome driver为: {latest_version}，下载地址为 {latest_download_url}")
-
-    zip_file = download_file(latest_download_url, ".")
-    decompress_dir_with_bandizip(zip_file, dir_src_path=SRC_DIR)
-
-    # 移除临时文件
-    remove_file(zip_file)
-
-    # 重命名
-    major_version = parse_major_version(latest_version)
-    chrome_driver = f"chromedriver_{major_version}.exe"
-    os.rename(CHROME_DRIVER_EXE, chrome_driver)
-    logger.info(f"重命名为 {chrome_driver}")
-
-    version_info = subprocess.check_output([os.path.realpath(chrome_driver), "--version"]).decode("utf-8")
-    logger.info(color("bold_green") + f"chrome获取完毕，chrome driver版本为 {version_info}")
+    download_chrome_driver(latest_version, ".", SRC_DIR)
 
 
 def get_latest_chrome_driver_version() -> str:
     res = requests.get("https://chromedriver.storage.googleapis.com/LATEST_RELEASE")
 
     return res.text
-
-
-def parse_major_version(latest_version: str) -> int:
-    return int(latest_version.split(".")[0])
 
 
 def get_latest_major_version() -> int:
@@ -105,14 +91,23 @@ def get_latest_installed_chrome_version_directory() -> str:
 
 
 def download_chrome_installer():
-    download_page = requests.get("https://www.iplaysoft.com/tools/chrome/").text
+    download_page = requests.get(
+        "https://www.ghxi.com/pcchrome.html",
+        headers={
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
+        },
+    ).text
 
     soup = BeautifulSoup(download_page, "html.parser")
 
-    latest_version_soup = soup.find("div", class_="ui segment")
+    latest_version_soup = soup.find("h1", class_="entry-title")
 
-    download_url = latest_version_soup.find("a", class_="ui positive button").get("href")
-    latest_version = latest_version_soup.find("code").text[1:]
+    # 'Google Chrome v110.0.5481.78 正式版 离线安装包'
+    reg_version = r"Google Chrome v([0-9.]+) 正式版 离线安装包"
+    match = re.match(reg_version, latest_version_soup.text)
+    latest_version = match.group(1)
+
+    download_url = "http://redirector.gvt1.com/edgedl/chrome/install/GoogleChromeStandaloneEnterprise64.msi"
 
     logger.info(f"最新版本的下载链接为: {download_url}")
     download_file(download_url, ".", f"Chrome_{latest_version}_普通安装包_非便携版.exe")
@@ -120,11 +115,17 @@ def download_chrome_installer():
 
 def update_qq_login_version():
     major_version = get_latest_major_version()
+    latest_chrome_driver_version = get_latest_chrome_driver_version()
 
     qq_login_file = os.path.join(SRC_DIR, "qq_login.py")
 
     replace_text_in_file(qq_login_file, r"chrome_major_version = (\d+)", f"chrome_major_version = {major_version}")
-    logger.info(f"已将 {qq_login_file} 中的 chrome_major_version 修改为 {major_version}")
+    replace_text_in_file(
+        qq_login_file, r'chrome_driver_version = "[0-9.]+"', f'chrome_driver_version = "{latest_chrome_driver_version}"'
+    )
+    logger.info(
+        f"已将 {qq_login_file} 中的 chrome_major_version 修改为 {major_version}, chrome_driver_version 修改为 {latest_chrome_driver_version}"
+    )
 
 
 def replace_text_in_file(filepath: str, pattern: str, repl: str):
@@ -165,6 +166,7 @@ def upload_all_to_netdisk():
             upload(os.path.realpath(str(file)), f"/文本编辑器、chrome浏览器、autojs、HttpCanary等小工具/{file.name}")
 
 
+@try_except()
 def update_latest_chrome():
     # 最大化窗口
     change_console_window_mode_async(disable_min_console=True)
@@ -176,29 +178,32 @@ def update_latest_chrome():
     logger.info(f"临时切换到 {TEMP_DIR}，方便后续操作")
     os.chdir(TEMP_DIR)
 
-    # 下载chrome driver
+    show_head_line("从官方网站下载最新版chrome driver")
     download_latest_chrome_driver()
 
-    # 制作chrome便携版
+    show_head_line("开始利用本机chrome下载的更新包制作便携版")
     create_portable_chrome()
 
-    # 下载chrome安装包
+    show_head_line("从 果核剥壳网 下载最新离线安装包")
     download_chrome_installer()
 
-    # 修改 qq_login.py 中的版本号为新的主版本号
+    show_head_line("修改 qq_login.py 中的版本号为新的主版本号")
     update_qq_login_version()
 
-    # 更新linux版的路径
+    show_head_line("更新linux版的路径")
     update_linux_version()
 
-    # 上传到网盘
-    upload_all_to_netdisk()
-
-    # 提示确认代码修改是否无误
-    logger.info(color("bold_green") + "请检查一遍代码，然后执行一遍 qq_login.py，以确认新的chrome制作无误，然后点击任意键提交git即可完成流程")
+    show_head_line("提示确认代码修改是否无误")
+    logger.info(
+        color("bold_green")
+        + "请检查一遍代码，然后执行一遍 qq_login.py，以确认新的chrome制作无误，然后点击任意键提交git即可完成流程"
+    )
     pause()
 
-    # git commit 相关代码
+    show_head_line("上传到网盘")
+    upload_all_to_netdisk()
+
+    show_head_line("git commit 相关代码")
     os.chdir(SRC_DIR)
     latest_version = get_latest_chrome_driver_version()
     subprocess.call(
@@ -215,7 +220,7 @@ def update_latest_chrome():
     logger.info(f"更新完毕，清理临时目录 {TEMP_DIR}")
     remove_directory(TEMP_DIR)
 
-    # 最后暂停下，方便确认结果
+    show_head_line("最后暂停下，方便确认结果")
     pause()
 
 

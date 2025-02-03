@@ -5,6 +5,8 @@ import random
 from typing import Callable
 
 import requests
+from urllib3 import disable_warnings
+from urllib3.exceptions import InsecureRequestWarning
 
 from const import downloads_dir
 from log import color, logger
@@ -14,12 +16,13 @@ user_agent_headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.61 Safari/537.36",
 }
 
-progress_callback_func_type = Callable[[str, int, int, float], None]
+# 全局禁用 SSL 警告
+disable_warnings(InsecureRequestWarning)
 
+progress_callback_func_type = Callable[[str, int, int, float], None]
 
 # 默认连接超时
 DOWNLOAD_CONNECT_TIMEOUT = 8
-
 
 # 测速模式开关，开启后将对比各个不同镜像的下载速度
 TEST_SPEED_MODE = False
@@ -32,6 +35,7 @@ def download_file(
     filename="",
     connect_timeout=DOWNLOAD_CONNECT_TIMEOUT,
     extra_progress_callback: progress_callback_func_type | None = None,
+    extra_info="",
 ) -> str:
     """
     下载指定url的文件到指定目录
@@ -51,12 +55,16 @@ def download_file(
     target_file_path = os.path.join(download_dir, filename)
 
     logger.info(f"开始下载 {url} 到 {target_file_path}（连接超时为 {connect_timeout} 秒）")
-    response = requests.get(url, stream=True, timeout=connect_timeout, headers=user_agent_headers)
+    if extra_info != "":
+        logger.info(extra_info)
+    response = requests.get(url, stream=True, timeout=connect_timeout, headers=user_agent_headers, verify=False)
 
     if response.status_code != 200:
         raise Exception(f"下载失败，状态码 {response.status_code}")
 
     make_sure_dir_exists(download_dir)
+
+    check_cloudflare_100mb_test(response)
 
     with open(target_file_path, "wb") as f:
         total_length_optional = response.headers.get("content-length")
@@ -101,6 +109,15 @@ def download_file(
     return target_file_path
 
 
+def check_cloudflare_100mb_test(response: requests.Response):
+    content_type = response.headers.get("content-type")
+    content_length = response.headers.get("content-length")
+    server = response.headers.get("server")
+
+    if content_type == "application/x-tar" and content_length == "104857600" and server == "cloudflare":
+        raise Exception("镜像返回了cf的拦截文件100mb.test，跳过当前镜像")
+
+
 def extend_urls(current_urls: list[str], new_urls: list[str]):
     urls_to_add = [*new_urls]
     if not TEST_SPEED_MODE:
@@ -116,6 +133,7 @@ def download_latest_github_release(
     repo_name="djc_helper",
     connect_timeout=DOWNLOAD_CONNECT_TIMEOUT,
     extra_progress_callback: progress_callback_func_type | None = None,
+    version="",
 ) -> str:
     """
     从github及其镜像下载指定仓库最新的release中指定资源
@@ -126,12 +144,15 @@ def download_latest_github_release(
     :param repo_name: 仓库名称
     :param connect_timeout: 连接超时时间
     :param extra_progress_callback: 每次更新进度时的额外回调，比如可在特定条件下通过抛异常来中断下载
+    :param version: 指定的版本号，形如 20.1.2，若未指定则下载最新版本
     :return: 最终下载的本地文件绝对路径
     """
     if TEST_SPEED_MODE:
         logger.warning("当前为测速模式，将禁用洗牌流程，并依次尝试各个镜像，从而进行对比")
 
     release_file_path = f"{owner}/{repo_name}/releases/latest/download/{asset_name}"
+    if version != "":
+        release_file_path = f"{owner}/{repo_name}/releases/download/v{version}/{asset_name}"
 
     # note: 手动测试下载速度时，使用 IDM / 迅雷 等测试，不要直接用chrome测试，速度差很多
 
@@ -141,48 +162,89 @@ def download_latest_github_release(
     extend_urls(
         urls,
         [
-            # 19.3MiB/s
-            f"https://ghdl.feizhuqwq.cf/https://github.com/{release_file_path}",
-            # 7.9MiB/s
-            f"https://ghproxy.com/https://github.com/{release_file_path}",
-            # 15.9MiB/s
-            f"https://proxy.zyun.vip/https://github.com/fzls/djc_helper/releases/latest/download/{asset_name}",
-            # 15.7MiB/s
-            f"https://github.91chi.fun/https://github.com/{release_file_path}",
+            # 9.3MiB/s
+            f"https://cors.isteed.cc/github.com/{release_file_path}",
+            # 8.8MiB/s
+            f"https://github.boki.moe/https://github.com/{release_file_path}",
+            # 8.7MiB/s
+            f"https://slink.ltd/https://github.com/{release_file_path}",
+            # 8.0MiB/s
+            f"https://ghproxy.cc/https://github.com/{release_file_path}",
+            # 4.9MiB/s
+            f"https://gh-proxy.com/https://github.com/{release_file_path}",
         ],
     )
 
     # 最后加入几个慢的镜像和源站
     extend_urls(
         urls,
-        [
-            # timeout
-            f"https://github.com/{release_file_path}",
-        ],
+        [],
     )
 
     # 再保底放入一些可能失效的镜像
     extend_urls(
         urls,
         [
-            # 19.1MiB/s
-            f"https://cors.isteed.cc/github.com/fzls/djc_helper/releases/latest/download/{asset_name}",
-            # 19.0MiB/s
-            f"https://gh.ddlc.top/https://github.com/{release_file_path}",
-            # 17.6MiB/s
-            f"https://gh.api.99988866.xyz/https://github.com/{release_file_path}",
-            # 15.9MiB/s
-            f"https://gh2.yanqishui.work/https://github.com/{release_file_path}",
-            # 12.7MiB/s
-            f"https://gh-proxy-misakano7545.koyeb.app/https://github.com/{release_file_path}",
-            # 11.0MiB/s
-            f"https://gh.gh2233.ml/https://github.com/{release_file_path}",
-            # 980.7KiB/s
-            f"https://download.fastgit.org/{release_file_path}",
-            # 54.2KiB/s
-            f"https://kgithub.com/{release_file_path}",
+            # timeout
+            f"https://mirror.ghproxy.com/https://github.com/{release_file_path}",
+            # 2.1MiB/s
+            f"https://kkgithub.com/{release_file_path}",
+            # 521
+            f"https://github.moeyy.xyz/https://github.com/{release_file_path}",
+            # 9.7MiB/s
+            f"https://gh.h233.eu.org/https://github.com/{release_file_path}",
+            # timeout
+            f"https://download.ixnic.net/{release_file_path}",
+            # timeout
+            f"https://dgithub.xyz/{release_file_path}",
         ],
     )
+
+    # 一些注释掉的已失效的，仅留着备忘
+    _ = memo_invalid_mirror_list = [  # noqa: F841
+        # 588.1KiB/s
+        f"https://gh.api.99988866.xyz/https://github.com/{release_file_path}",
+        # 12.1B/s
+        f"https://gh.con.sh/https://github.com/{release_file_path}",
+        # 2.8KiB/s
+        f"https://dl.ghpig.top/https://github.com/{release_file_path}",
+        # 1.3KiB/s
+        f"https://dl-slb.ghpig.top/https://github.com/{release_file_path}",
+        # 441.9B/s
+        f"https://js.xxooo.ml/https://github.com/{release_file_path}",
+        # 1.0KiB/s
+        f"https://gh.gh2233.ml/https://github.com/{release_file_path}",
+        # 502
+        f"https://download.yzuu.cf/{release_file_path}",
+        # NameResolutionError
+        f"https://download.fastgit.org/{release_file_path}",
+        # 429
+        f"https://gh.ddlc.top/https://github.com/{release_file_path}",
+        # NameResolutionError
+        f"https://download.njuu.cf/{release_file_path}",
+        # 502
+        f"https://download.nuaa.cf/{release_file_path}",
+        # 403
+        f"https://ghps.cc/https://github.com/{release_file_path}",
+        # 403
+        f"https://hub.gitmirror.com/https://github.com/{release_file_path}",
+        # NameResolutionError
+        f"https://download.fgit.cf/{release_file_path}",
+        # 502
+        f"https://ghproxy.net/https://github.com/{release_file_path}",
+        # ConnectionResetError
+        f"https://ghproxy.com/https://github.com/{release_file_path}",
+        # NameResolutionError
+        f"https://proxy.zyun.vip/https://github.com/{release_file_path}",
+        # ConnectTimeoutError
+        f"https://github.com/{release_file_path}",
+        # ConnectTimeoutError
+        f"https://kgithub.com/{release_file_path}",
+        # NameResolutionError
+        f"https://ghdl.feizhuqwq.cf/https://github.com/{release_file_path}",
+        # NameResolutionError
+        f"https://download.fastgit.ixmu.net/{release_file_path}",
+    ]
 
     if TEST_SPEED_MODE:
         logger.info(color("bold_cyan") + "当前全部镜像如下:\n" + "\n".join(urls) + "\n")
@@ -241,10 +303,14 @@ def download_github_raw_content(
     extend_urls(
         urls,
         [
-            # 144.4KiB/s
-            f"https://raw.kgithub.com/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
-            # 154.4KiB/s
-            f"https://ghproxy.com/https://raw.githubusercontent.com/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
+            # 430.8KiB/s
+            f"https://wget.la/https://raw.githubusercontent.com/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
+            # 235.0KiB/s
+            f"https://ghproxy.net/https://raw.githubusercontent.com/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
+            # 92.4KiB/s
+            f"https://raw.gitmirror.com/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
+            # 108.0KiB/s
+            f"https://github.moeyy.xyz/https://raw.githubusercontent.com/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
         ],
     )
 
@@ -252,12 +318,8 @@ def download_github_raw_content(
     extend_urls(
         urls,
         [
-            # 130.3KiB/s
-            f"https://raw.iqiq.io/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
-            # 48.6KiB/s
+            # 3.3KiB/s
             f"https://fastly.jsdelivr.net/gh/{owner}/{repo_name}@{branch_name}/{filepath_in_repo}",
-            # 52.1KiB/s
-            f"https://cdn.jsdelivr.net/gh/{owner}/{repo_name}@{branch_name}/{filepath_in_repo}",
         ],
     )
 
@@ -265,23 +327,12 @@ def download_github_raw_content(
     extend_urls(
         urls,
         [
-            # timeout or 69.4KiB/s
+            # timeout | 21.4KiB/s
             f"https://github.com/{owner}/{repo_name}/raw/{branch_name}/{filepath_in_repo}",
-        ],
-    )
-
-    # 再加入可能已失效的镜像
-    extend_urls(
-        urls,
-        [
-            # 1023.6KiB/s
-            f"https://github.moeyy.xyz/https://raw.githubusercontent.com/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
-            # 279.9KiB/s
-            f"https://raw.fastgit.org/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
-            # 257.2KiB/s
-            f"https://raw.githubusercontents.com/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
-            # 836.5KiB/s
-            f"https://ghproxy.net/https://raw.githubusercontent.com/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
+            # 502
+            f"https://gitdl.cn/https://raw.githubusercontent.com/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
+            # timeout
+            f"https://raw.ixnic.net/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
         ],
     )
 
@@ -289,12 +340,46 @@ def download_github_raw_content(
     extend_urls(
         urls,
         [
-            # 448.1KiB/s
+            # 54.3KiB/s
             f"https://gcore.jsdelivr.net/gh/{owner}/{repo_name}@{branch_name}/{filepath_in_repo}",
-            # 483.0KiB/s
-            f"https://cdn.staticaly.com/gh/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
+            # 703.9KiB/s
+            f"https://jsd.cdn.zzko.cn/gh/{owner}/{repo_name}@{branch_name}/{filepath_in_repo}",
+            # 165.2KiB/s
+            f"https://jsdelivr.pai233.top/gh/{owner}/{repo_name}@{branch_name}/{filepath_in_repo}",
         ],
     )
+
+    # 一些注释掉的已失效的，仅留着备忘
+    _ = memo_invalid_mirror_list = [  # noqa: F841
+        # 无法连接
+        f"https://raw.kkgithub.com/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
+        # timeout
+        f"https://ghgo.xyz/https://raw.githubusercontent.com/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
+        # ConnectionResetError
+        f"https://jsd.proxy.aks.moe/gh/{owner}/{repo_name}@{branch_name}/{filepath_in_repo}",
+        # 421
+        f"https://raw.githubusercontents.com/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
+        # ConnectTimeoutError
+        f"https://mirror.ghproxy.com/https://raw.githubusercontent.com/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
+        # NameResolutionError
+        f"https://raw.fastgit.org/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
+        # ConnectTimeoutError
+        f"https://cdn.jsdelivr.net/gh/{owner}/{repo_name}@{branch_name}/{filepath_in_repo}",
+        # ConnectionResetError
+        f"https://jsdelivr.b-cdn.net/gh/{owner}/{repo_name}@{branch_name}/{filepath_in_repo}",
+        # NameResolutionError
+        f"https://raw.fgit.cf/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
+        # 502
+        f"https://gh-proxy.com/https://raw.githubusercontent.com/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
+        # ConnectionResetError
+        f"https://ghproxy.com/https://raw.githubusercontent.com/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
+        # 531.7B/s
+        f"https://raw.iqiq.io/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
+        # NameResolutionError
+        f"https://raw.fastgit.ixmu.net/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
+        # ConnectTimeoutError
+        f"https://raw.kgithub.com/{owner}/{repo_name}/{branch_name}/{filepath_in_repo}",
+    ]
 
     if TEST_SPEED_MODE:
         logger.info(color("bold_cyan") + "当前全部镜像如下:\n" + "\n".join(urls) + "\n")
@@ -329,8 +414,12 @@ def download_github_raw_content(
 
 
 def log_mirror_status(current_index: int, total_count: int, mirror: str):
+    if TEST_SPEED_MODE:
+        logger.info("\n")
     logger.info(
-        f"{current_index + 1}/{total_count}: 尝试镜像： {mirror}" + color("bold_yellow") + "（如果速度较慢，请按 ctrl + c 强制切换下一个镜像）"
+        f"{current_index + 1}/{total_count}: 尝试镜像： {mirror}"
+        + color("bold_yellow")
+        + "（如果速度较慢，请按 ctrl + c 强制切换下一个镜像）"
     )
 
 
@@ -344,4 +433,4 @@ def extract_mirror_site(mirror_download_url: str, *words_to_remove: str) -> str:
 
 if __name__ == "__main__":
     # download_latest_github_release()
-    download_github_raw_content("djc_helper.py")
+    download_github_raw_content("CHANGELOG.MD")

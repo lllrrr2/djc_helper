@@ -8,7 +8,7 @@ from usage_count import increase_counter
 server_ip_list = [
     # "127.0.0.1",  # 本地测试机
     "101.43.54.94",  # 腾讯云轻量服务器
-    "114.132.252.185",  # 轻量服务器一号（备用）
+    # "114.132.252.185",  # 轻量服务器一号（备用）
     # "139.198.179.81",  # 青云
 ]
 
@@ -21,14 +21,19 @@ current_chosen_server_ip = ""
 # 相关服务的端口
 pay_server_port = "8438"
 match_server_port = "8439"
+alist_server_port = "5244"
 
 
-def get_pay_server_addr(server_ip="") -> str:
+def get_pay_server_addr() -> str:
     return f"http://{get_server_ip()}:{pay_server_port}"
 
 
 def get_match_server_api(api_name="/") -> str:
     return f"http://{get_server_ip()}:{match_server_port}{api_name}"
+
+
+def get_alist_server_addr() -> str:
+    return f"http://{get_server_ip()}:{alist_server_port}"
 
 
 def get_server_ip() -> str:

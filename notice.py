@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import json
 import os.path
 from datetime import timedelta
-from typing import List, Optional
 
 from const import downloads_dir
 from data_struct import ConfigInterface, to_raw_type
@@ -81,7 +82,12 @@ class NoticeManager:
     archived_notices_file_name = "notice_archived.txt"
 
     def __init__(self, load_from_remote=True, download_only_if_not_exists=False):
-        self.notices: List[Notice] = []
+        """
+
+        :param load_from_remote: 是否从远程加载配置文件，目前仅在本地添加公告时，该值会为False
+        :param download_only_if_not_exists: 是否仅在文件不存在时下载。在本体运行时，该值为False，而通过配置工具调用时，则取True
+        """
+        self.notices: list[Notice] = []
 
         self.file_name = self.current_notices_file_name
 
@@ -161,7 +167,7 @@ class NoticeManager:
         send_at: str = "",
         show_type=NoticeShowType.ONCE,
         open_url="",
-        valid_duration: Optional[timedelta] = None,
+        valid_duration: timedelta | None = None,
         show_only_before_version="",
     ):
         send_at = send_at or format_now()
@@ -195,11 +201,11 @@ def main():
     nm = NoticeManager(load_from_remote=False)
 
     # note: 在这里添加公告
-    title = "道聚城绑定角色提示失败"
-    message = """如果突然开始提示未绑定账号，请下载最新版本 19.4.7（因此步骤在自动更新之前，所以请手动更新下-。-）
-
-原因：道聚城修改了鉴权体系，由uin+skey转为openid+access_token，因此会导致请求绑定角色信息失败。
-后续将会考虑改为类似活动网页中一样，手动在配置工具中选择一次绑定角色，并保存到配置文件中，这样后续就不依赖道聚城的接口了。
+    title = "25.1 新年限免"
+    message = """小助手从最开始 2020年8月23日 开始为了实现道聚城的聚豆自动化而做的雏形开始，一点点迭代更新到现在，已经支持DNF的大部分网页蚊子腿，也已经有4年4个月多了。
+由于后续维护需要花的时间越来越多，在 2021年2月6号 开始，小助手的打包版本的部分功能需要付费期间才能使用。由于有不少朋友一路支持，小助手也算是持续地维护下来了。
+在这样一个时间点，顺带庆祝2025年的阳历新年，我试着做了个限免活动，来稍稍回馈各位朋友的支持。
+在 2025-01-06 21:00:00 到 2025-02-06 21:00:00 这一个月期间，无需付费即可使用小助手打包版本中的付费功能。期间已付费的朋友将自动向后顺延相应时长。
 """
     open_url = ""
     show_only_before_version = ""

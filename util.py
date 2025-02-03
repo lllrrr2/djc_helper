@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import base64
 import ctypes
 import datetime
@@ -22,9 +24,9 @@ import uuid
 import webbrowser
 from functools import lru_cache, wraps
 from multiprocessing import cpu_count
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Callable
 from urllib import parse
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, unquote_plus
 
 import psutil
 import requests.exceptions
@@ -32,7 +34,7 @@ import selenium.common.exceptions
 import toml
 import urllib3.exceptions
 
-from compress import compress_in_memory_with_lzma, decompress_in_memory_with_lzma
+from compress import compress_in_memory_with_lzma, decompress_dir_with_bandizip, decompress_in_memory_with_lzma
 from const import cached_dir, db_top_dir
 from db import CacheDB, CacheInfo
 from exceptions_def import SameAccountTryLoginAtMultipleThreadsException
@@ -63,7 +65,9 @@ def check_some_exception(e: Exception, show_last_process_result=True) -> str:
         requests.exceptions.ConnectTimeout,
         requests.exceptions.ReadTimeout,
     ]:
-        msg += format_msg("网络超时了，一般情况下是因为网络问题，也有可能是因为对应网页的服务器不太行，多试几次就好了<_<（不用管，会自动重试的）")
+        msg += format_msg(
+            "网络超时了，一般情况下是因为网络问题，也有可能是因为对应网页的服务器不太行，多试几次就好了<_<（不用管，会自动重试的）"
+        )
     elif type(e) in [
         PermissionError,
     ]:
@@ -74,15 +78,36 @@ def check_some_exception(e: Exception, show_last_process_result=True) -> str:
         )
     elif type(e) is OSError:
         # OSError: [WinError 1455] 页面文件太小，无法完成操作。
+        e: OSError  # type: ignore
+
         if e.winerror == 1455:
-            msg += format_msg(f"当前电脑内存不足，请调小多进程相关配置。可将【配置工具/公共配置/多进程】调整为当前cpu的一半（{cpu_count() / 2}），或者其他合适的数值，或者关闭。")
+            msg += format_msg(
+                f"当前电脑内存不足，请调小多进程相关配置。可将【配置工具/公共配置/多进程】调整为当前cpu的一半（{cpu_count() / 2}），或者其他合适的数值，或者关闭。"
+            )
     elif type(e) is FileNotFoundError:
         # FileNotFoundError: [Errno 2] No such file or directory: 'config.toml'
-        msg += format_msg(f"文件 {e.filename} 不见了，很有可能是被杀毒软件删除了，请重新解压一份小助手来使用，同时最好将小助手所在文件夹添加到杀毒软件的白名单中")
+        e: FileNotFoundError  # type: ignore
+
+        msg += format_msg(
+            f"文件 {e.filename} 不见了，很有可能是被杀毒软件删除了，请重新解压一份小助手来使用，同时最好将小助手所在文件夹添加到杀毒软件的白名单中"
+        )
+        if e.filename == "config.toml":
+            msg += format_msg(
+                f"  被删除的这个文件({e.filename})是小助手的配置文件，如果之前运行过，可以在稍后自动打开的目录中，找到一个最近的备份，然后将这个文件复制回小助手的目录即可",
+                "bold_cyan",
+            )
+
+            from main_def import get_config_backup_dir
+
+            config_backup_dir = get_config_backup_dir()
+            open_with_default_app(config_backup_dir)
+
     elif type(e) in [
         selenium.common.exceptions.TimeoutException,
     ]:
-        msg += format_msg("浏览器等待对应元素超时了，很常见的。如果一直超时导致无法正常运行，可去config.example.toml将登录超时相关配置加到config.toml中，并调大超时时间")
+        msg += format_msg(
+            "浏览器等待对应元素超时了，很常见的。如果一直超时导致无法正常运行，可去config.example.toml将登录超时相关配置加到config.toml中，并调大超时时间"
+        )
     elif type(e) in [
         SameAccountTryLoginAtMultipleThreadsException,
     ]:
@@ -94,8 +119,20 @@ def check_some_exception(e: Exception, show_last_process_result=True) -> str:
 
         if last_response_info is not None:
             lr = last_response_info
-            text = parse_unicode_escape_string(lr.text)
-            msg += format_msg(f"最近一次收到的请求结果为：status_code={lr.status_code} reason={lr.reason} \n{text}", "bold_cyan")
+
+            text = lr.text
+            unicode_decoded_text = parse_unicode_escape_string(lr.text)
+            if text != unicode_decoded_text:
+                text = unicode_decoded_text
+
+            # fmt: off
+            msg += format_msg(
+                (
+                    f"最近一次收到的请求结果为：status_code={lr.status_code} reason={lr.reason}\n"
+                    f"{text}\n"
+                ), "bold_cyan"
+            )
+            # fmt: on
 
     return msg
 
@@ -158,6 +195,7 @@ def ensure_cmd_window_buffer_size_for_windows(cfg):
 
 
 def is_running_under_windows_terminal_in_win11() -> bool:
+    logger.debug(f"检测终端 system={platform.system()} release={platform.release()} version={platform.version()}")
     is_win11 = platform.system() == "Windows" and platform.release() == "10" and platform.version() >= "10.0.22000"
     if not is_win11:
         return False
@@ -197,7 +235,9 @@ def change_console_window_mode(cfg, disable_min_console=False):
         return
 
     if is_running_under_windows_terminal_in_win11():
-        logger.info(color("bold_yellow") + "检测到当前默认终端是 WindowsTerminal，为避免桌面卡住，将跳过最大化/最小化流程")
+        logger.info(
+            color("bold_yellow") + "检测到当前默认终端是 WindowsTerminal，为避免桌面卡住，将跳过最大化/最小化流程"
+        )
         async_message_box(
             (
                 "检测到当前默认终端是 WindowsTerminal，为避免桌面卡住，将跳过最大化/最小化流程\n"
@@ -236,9 +276,9 @@ def try_set_console_window_mode(show_mode: int, mode_name: str, mode_enabled: bo
     parents = get_parents(current_pid)
 
     # 找到所有窗口中在该当前进程到进程树的顶端之间路径的窗口
-    candidates_index_to_hwnd: Dict[int, int] = {}
+    candidates_index_to_hwnd: dict[int, int] = {}
 
-    def max_current_console(hwnd: int, argument: Dict[int, int]):
+    def max_current_console(hwnd: int, argument: dict[int, int]):
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
         if pid in parents:
             # 记录下他们在进程树路径的下标
@@ -281,6 +321,9 @@ def async_message_box(
     color_name="bold_cyan",
     open_image="",
     show_once_daily=False,
+    show_once_monthly=False,
+    show_once_weekly=False,
+    do_not_show_message_box=False,
 ):
     async_call(
         message_box,
@@ -295,6 +338,9 @@ def async_message_box(
         open_image,
         show_once_daily,
         call_from_async=True,
+        show_once_monthly=show_once_monthly,
+        show_once_weekly=show_once_weekly,
+        do_not_show_message_box=do_not_show_message_box,
     )
 
 
@@ -311,20 +357,33 @@ def message_box(
     show_once_daily=False,
     use_qt_messagebox=False,
     call_from_async=False,
+    show_once_monthly=False,
+    show_once_weekly=False,
+    do_not_show_message_box=False,
 ):
-    get_log_func(logger.warning, print_log)(color(color_name) + msg.replace("\n\n", "\n"))
+    log_message = title + "\n" + msg.replace("\n\n", "\n")
+    if open_url != "" and open_url not in log_message:
+        log_message = log_message + f"\n\n需打开的网页链接为：{open_url}"
+    get_log_func(logger.warning, print_log)(color(color_name) + log_message)
 
     if is_run_in_github_action():
         return
 
-    from first_run import is_daily_first_run, is_first_run
+    from first_run import is_daily_first_run, is_first_run, is_monthly_first_run, is_weekly_first_run
 
     show_message_box = True
     if show_once and not is_first_run(f"message_box_{title}"):
         show_message_box = False
     if show_once_daily and not is_daily_first_run(f"daily_message_box_{title}"):
         show_message_box = False
+    if show_once_monthly and not is_monthly_first_run(f"monthly_message_box_{title}"):
+        show_message_box = False
+    if show_once_weekly and not is_weekly_first_run(f"weekly_message_box_{title}"):
+        show_message_box = False
     if follow_flag_file and exists_flag_file(".no_message_box"):
+        show_message_box = False
+    if do_not_show_message_box:
+        # 部分情况下，在外部控制一些特定的条件下不显示弹窗，而其他时候继续显示，同时希望一直打印日志，那么在那些特定的条件下可以使用这个参数来临时取消弹窗
         show_message_box = False
 
     if show_message_box and is_windows():
@@ -350,7 +409,7 @@ def message_box(
             os.popen(os.path.realpath(open_image))
 
 
-def get_screen_size() -> Tuple[int, int]:
+def get_screen_size() -> tuple[int, int]:
     """
     :return: 屏幕宽度和高度
     """
@@ -384,12 +443,16 @@ def show_unexpected_exception_message(e: Exception):
     logger.warning(color("fg_bold_cyan") + "如果稳定报错，不妨打开网盘，看看是否有新版本修复了这个问题~")
     logger.warning(color("fg_bold_cyan") + "如果稳定报错，不妨打开网盘，看看是否有新版本修复了这个问题~")
     logger.warning(color("fg_bold_green") + "如果要反馈，请把整个窗口都截图下来- -不要只截一部分")
-    logger.warning(color("fg_bold_yellow") + "不要自动无视上面这三句话哦，写出来是让你看的呀<_<不知道出啥问题的时候就按提示去看看是否有新版本哇，而不是不管三七二十一就来群里问嗷")
+    logger.warning(
+        color("fg_bold_yellow")
+        + "不要自动无视上面这三句话哦，写出来是让你看的呀<_<不知道出啥问题的时候就按提示去看看是否有新版本哇，而不是不管三七二十一就来群里问嗷"
+    )
     logger.warning(color("fg_bold_cyan") + f"链接：{cfg.common.netdisk_link}")
 
     if run_from_src():
         show_head_line(
-            "目前使用的是源码版本，出现任何问题请自行调试或google解决，这是使用源码版本的前提。另外，在出问题时，建议先尝试更新依赖库，确保与依赖配置中的版本匹配。", color("bold_yellow")
+            "目前使用的是源码版本，出现任何问题请自行调试或google解决，这是使用源码版本的前提。另外，在出问题时，建议先尝试更新依赖库，确保与依赖配置中的版本匹配。",
+            color("bold_yellow"),
         )
 
 
@@ -401,7 +464,10 @@ def disable_quick_edit_mode():
     def _cb():
         ENABLE_EXTENDED_FLAGS = 0x0080
 
-        logger.info(color("bold_green") + "将禁用命令行的快速编辑模式，避免鼠标误触时程序暂停，若需启用，请去配置文件取消禁用快速编辑模式~")
+        logger.info(
+            color("bold_green")
+            + "将禁用命令行的快速编辑模式，避免鼠标误触时程序暂停，若需启用，请去配置文件取消禁用快速编辑模式~"
+        )
         show_quick_edit_mode_tip()
         kernel32 = ctypes.windll.kernel32
         kernel32.SetConsoleMode(kernel32.GetStdHandle(win32api.STD_INPUT_HANDLE), ENABLE_EXTENDED_FLAGS)
@@ -411,13 +477,21 @@ def disable_quick_edit_mode():
 
 def show_quick_edit_mode_tip():
     logger.info(
-        color("bold_blue") + "当前已禁用快速编辑，如需复制链接，请先按 CTRL+M 临时开启选择功能，然后选择要复制的区域，按 CTRL+C 进行复制\n"
+        color("bold_blue")
+        + "当前已禁用快速编辑，如需复制链接，请先按 CTRL+M 临时开启选择功能，然后选择要复制的区域，按 CTRL+C 进行复制\n"
         "（如果点击后会退出，也可以点击命令栏左上角图标，编辑->标记，然后选择复制区域来复制即可）"
     )
 
 
-def change_title(dlc_info="", monthly_pay_info="", multiprocessing_pool_size=0, enable_super_fast_mode=False):
-    if dlc_info == "" and exists_auto_updater_dlc():
+def change_title(
+    dlc_info="",
+    monthly_pay_info="",
+    multiprocessing_pool_size=0,
+    enable_super_fast_mode=False,
+    may_have_buy_dlc=True,
+    show_next_regular_activity_info=False,
+):
+    if dlc_info == "" and exists_auto_updater_dlc() and may_have_buy_dlc:
         dlc_info = " 自动更新豪华升级版"
 
     pool_info = ""
@@ -427,6 +501,13 @@ def change_title(dlc_info="", monthly_pay_info="", multiprocessing_pool_size=0, 
             pool_info = "超级" + pool_info
 
     set_title_cmd = f"title DNF蚊子腿小助手 {dlc_info} {monthly_pay_info} {pool_info} v{now_version} {ver_time} by风之凌殇 {get_random_face()}"
+
+    if show_next_regular_activity_info:
+        time_since_last_update = get_time_since_last_update()
+        if time_since_last_update.days >= 14:
+            # 距离当前版本发布一定时间后，在标题栏增加显示下次常规活动的预估时间信息
+            set_title_cmd = set_title_cmd + " 下个常规活动周期可能是 " + get_next_regular_activity_desc()
+
     if is_windows():
         os.system(set_title_cmd)
     else:
@@ -453,7 +534,7 @@ def uin2qq(uin):
 
 
 def is_valid_qq(qq: str) -> bool:
-    return qq.isnumeric()
+    return qq.isdigit()
 
 
 def exists_flag_file(flag_file_name: str) -> bool:
@@ -464,7 +545,7 @@ def printed_width(msg):
     return sum(1 if ord(c) < 128 else 2 for c in msg)
 
 
-def split_by_printed_width(msg: str, expect_width: int) -> Tuple[str, str]:
+def split_by_printed_width(msg: str, expect_width: int) -> tuple[str, str]:
     if printed_width(msg) <= expect_width:
         return msg, ""
 
@@ -495,8 +576,14 @@ def truncate(msg, expect_width) -> str:
     return "".join(truncated)
 
 
-def padLeftRight(msg, target_size, pad_char=" ", mode="middle", need_truncate=False):
-    msg = str(msg)
+def padLeftRight(target_msg, target_size, pad_char=" ", mode="middle", need_truncate=False):
+    msg = str(target_msg)
+    # re: 如果本列想要指定单独的颜色，可以在传入消息的时候不直接传字符串，而是传入一个三元素的列表或tuple，分别是消息内容、消息颜色，本行的颜色，这样可以实现本内容使用单独颜色，并在后面恢复原来的颜色
+    msg_color = None
+    line_color = None
+    if type(target_msg) is list or type(target_msg) is tuple:
+        msg, msg_color, line_color = target_msg
+
     if need_truncate:
         msg = truncate(msg, target_size)
     msg_len = printed_width(msg)
@@ -505,6 +592,9 @@ def padLeftRight(msg, target_size, pad_char=" ", mode="middle", need_truncate=Fa
         total = target_size - msg_len
         pad_left_len = total // 2
         pad_right_len = total - pad_left_len
+
+    if msg_color is not None and line_color is not None:
+        msg = msg_color + msg + asciiReset + line_color
 
     if mode == "middle":
         return pad_char * pad_left_len + msg + pad_char * pad_right_len
@@ -567,25 +657,25 @@ def get_now() -> datetime.datetime:
     return datetime.datetime.now()
 
 
-def get_this_week_monday(now: Optional[datetime.datetime] = None) -> str:
+def get_this_week_monday(now: datetime.datetime | None = None) -> str:
     return get_this_week_monday_datetime(now).strftime("%Y%m%d")
 
 
-def get_last_week_monday(now: Optional[datetime.datetime] = None) -> str:
+def get_last_week_monday(now: datetime.datetime | None = None) -> str:
     return get_last_week_monday_datetime(now).strftime("%Y%m%d")
 
 
-def get_this_week_monday_datetime(now: Optional[datetime.datetime] = None) -> datetime.datetime:
+def get_this_week_monday_datetime(now: datetime.datetime | None = None) -> datetime.datetime:
     now = now or get_now()
     monday = now - datetime.timedelta(days=now.weekday())
     return monday.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-def get_last_week_monday_datetime(now: Optional[datetime.datetime] = None) -> datetime.datetime:
+def get_last_week_monday_datetime(now: datetime.datetime | None = None) -> datetime.datetime:
     return get_this_week_monday_datetime(now) - datetime.timedelta(days=7)
 
 
-def get_this_thursday_of_dnf(now: Optional[datetime.datetime] = None) -> datetime.datetime:
+def get_this_thursday_of_dnf(now: datetime.datetime | None = None) -> datetime.datetime:
     # 计算本周所属的那个周四，以dnf的周期计算（不过以0点计算，不以六点）
     now = now or get_now()
 
@@ -600,49 +690,49 @@ def get_this_thursday_of_dnf(now: Optional[datetime.datetime] = None) -> datetim
     return dnf_thursday.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-def now_before(t="2000-01-01 00:00:00"):
+def now_before(t="2020-01-01 00:00:00"):
     return get_now() < parse_time(t)
 
 
-def now_after(t="2000-01-01 00:00:00"):
+def now_after(t="2020-01-01 00:00:00"):
     return get_now() >= parse_time(t)
 
 
-def now_in_range(left="2000-01-01 00:00:00", right="3000-01-01 00:00:00"):
+def now_in_range(left="2020-01-01 00:00:00", right="2030-01-01 00:00:00"):
     return now_after(left) and now_before(right)
 
 
-def get_now_unix(now: Optional[datetime.datetime] = None) -> int:
+def get_now_unix(now: datetime.datetime | None = None) -> int:
     now = now or get_now()
     return int(now.timestamp())
 
 
-def get_current(t: Optional[datetime.datetime] = None) -> str:
+def get_current(t: datetime.datetime | None = None) -> str:
     t = t or get_now()
     return t.strftime("%Y%m%d%H%M%S")
 
 
-def get_today(t: Optional[datetime.datetime] = None) -> str:
+def get_today(t: datetime.datetime | None = None) -> str:
     t = t or get_now()
     return t.strftime("%Y%m%d")
 
 
-def get_last_n_days(n, now: Optional[datetime.datetime] = None) -> List[str]:
+def get_last_n_days(n, now: datetime.datetime | None = None) -> list[str]:
     now = now or get_now()
     return [(now - datetime.timedelta(i)).strftime("%Y%m%d") for i in range(1, n + 1)]
 
 
-def get_week(t: Optional[datetime.datetime] = None) -> str:
+def get_week(t: datetime.datetime | None = None) -> str:
     t = t or get_now()
     return t.strftime("%Y-week-%W")
 
 
-def get_month(t: Optional[datetime.datetime] = None) -> str:
+def get_month(t: datetime.datetime | None = None) -> str:
     t = t or get_now()
     return t.strftime("%Y%m")
 
 
-def get_last_month(t: Optional[datetime.datetime] = None) -> str:
+def get_last_month(t: datetime.datetime | None = None) -> str:
     t = t or get_now()
     this_month_first_day, _ = start_and_end_date_of_a_month(t)
     last_month_last_day = this_month_first_day - datetime.timedelta(days=1)
@@ -650,7 +740,7 @@ def get_last_month(t: Optional[datetime.datetime] = None) -> str:
     return last_month_last_day.strftime("%Y%m")
 
 
-def get_year(t: Optional[datetime.datetime] = None) -> str:
+def get_year(t: datetime.datetime | None = None) -> str:
     t = t or get_now()
     return t.strftime("%Y")
 
@@ -768,28 +858,127 @@ def with_retry(max_retry_count=3, retry_wait_time=5, show_exception_info=True) -
     return decorator
 
 
-def is_act_expired(end_time: str, time_fmt="%Y-%m-%d %H:%M:%S", now: Optional[datetime.datetime] = None) -> bool:
+def is_act_expired(end_time: str, time_fmt="%Y-%m-%d %H:%M:%S", now: datetime.datetime | None = None) -> bool:
     now = now or get_now()
     return datetime.datetime.strptime(end_time, time_fmt) < now
 
 
 def will_act_expired_in(
-    end_time: str, duration: datetime.timedelta, time_fmt="%Y-%m-%d %H:%M:%S", now: Optional[datetime.datetime] = None
+    end_time: str, duration: datetime.timedelta, time_fmt="%Y-%m-%d %H:%M:%S", now: datetime.datetime | None = None
 ) -> bool:
     now = now or get_now()
     return datetime.datetime.strptime(end_time, time_fmt) < now + duration
 
 
 def get_remaining_time(
-    end_time, time_fmt="%Y-%m-%d %H:%M:%S", now: Optional[datetime.datetime] = None
+    end_time, time_fmt="%Y-%m-%d %H:%M:%S", now: datetime.datetime | None = None
 ) -> datetime.timedelta:
     now = now or get_now()
     return datetime.datetime.strptime(end_time, time_fmt) - now
 
 
-def get_past_time(t, time_fmt="%Y-%m-%d %H:%M:%S", now: Optional[datetime.datetime] = None) -> datetime.timedelta:
+def get_past_time(t, time_fmt="%Y-%m-%d %H:%M:%S", now: datetime.datetime | None = None) -> datetime.timedelta:
     now = now or get_now()
     return now - datetime.datetime.strptime(t, time_fmt)
+
+
+def get_next_expect_date_of_activity(
+    past_act_date_list: list[datetime.datetime], now: datetime.datetime | None = None
+) -> datetime.datetime:
+    """根据过去几年的活动的日期的平均值，推算下一次预估的日期（若今年已过，则取下一年）"""
+    now = now or get_now()
+
+    avg_day_in_year = math.floor(sum(dt.timetuple().tm_yday for dt in past_act_date_list) / len(past_act_date_list))
+
+    year = now.year
+    if now.timetuple().tm_yday > avg_day_in_year:
+        # 如果现在已经超过今年预估的这个日期，则取下一年
+        year = now.year + 1
+
+    expect_next_act_time = now.replace(
+        year=year, month=1, day=1, hour=0, minute=0, second=0, microsecond=0
+    ) + datetime.timedelta(days=avg_day_in_year - 1)
+
+    return expect_next_act_time
+
+
+def get_act_name_and_next_expect_time_list():
+    if use_by_myself():
+        last_maintain_time = parse_time("2024-11-03 00:00:00")
+        now = get_now()
+        since_last_maintain = now - last_maintain_time
+        if since_last_maintain.days >= 365:
+            async_message_box(
+                f"常规活动时间表上次的维护时间是 {last_maintain_time}，距今已有 {since_last_maintain}，超过一年了，需要补充下上次维护之后的常规活动的日期了（参考CHANGELOG中的记录）",
+                "（仅自己可见）该维护常规活动时间表了",
+                show_once_weekly=True,
+            )
+
+    # fmt: off
+    act_name_and_next_expect_time_list = [
+        ("春节", get_next_expect_date_of_activity([
+            datetime.datetime(2021, 1, 18),
+            datetime.datetime(2022, 1, 19),
+            datetime.datetime(2023, 1, 13),
+            datetime.datetime(2024, 1, 11),
+        ])),
+        ("五一", get_next_expect_date_of_activity([
+            datetime.datetime(2021, 4, 22),
+            datetime.datetime(2022, 4, 21),
+            datetime.datetime(2023, 4, 20),
+            datetime.datetime(2024, 4, 18),
+        ])),
+        ("周年庆", get_next_expect_date_of_activity([
+            datetime.datetime(2021, 6, 11),
+            datetime.datetime(2022, 6, 13),
+            datetime.datetime(2023, 6, 15),
+            datetime.datetime(2024, 6, 13),
+        ])),
+        ("国庆", get_next_expect_date_of_activity([
+            datetime.datetime(2020, 9, 24),
+            datetime.datetime(2021, 9, 14),
+            datetime.datetime(2022, 9, 22),
+            datetime.datetime(2023, 9, 24),
+            datetime.datetime(2024, 9, 12),
+        ])),
+        ("嘉年华", get_next_expect_date_of_activity([
+            datetime.datetime(2020, 12, 12),
+            datetime.datetime(2021, 12, 11),
+            datetime.datetime(2022, 11, 20),
+            datetime.datetime(2023, 11, 11),
+        ])),
+    ]
+    # fmt: on
+
+    # 按预估时间升序排序
+    act_name_and_next_expect_time_list.sort(key=lambda name_and_time: name_and_time[1])
+
+    return act_name_and_next_expect_time_list
+
+
+def get_next_regular_activity_name_and_expected_datetime() -> tuple[str, datetime.datetime]:
+    """获取下个常规活动的名字与预估日期"""
+
+    # 常规活动周期每年的开始时间统计及下次预估时间
+    act_name_and_next_expect_time_list = get_act_name_and_next_expect_time_list()
+
+    # 第一个就是下次的活动
+    next_act_name, next_act_time = act_name_and_next_expect_time_list[0]
+
+    return next_act_name, next_act_time
+
+
+def get_next_regular_activity_desc() -> str:
+    """
+    获取下个活动的预估信息，示例如下
+        春节 2024.2.1(68天后)
+    """
+    next_act_name, next_act_datetime = get_next_regular_activity_name_and_expected_datetime()
+
+    next_act_datetime_str = format_time(next_act_datetime, "%Y.%m.%d")
+    next_act_days = (next_act_datetime - get_now()).days
+
+    return f"{next_act_name} {next_act_datetime_str}({next_act_days}天后)"
 
 
 def show_end_time(end_time, time_fmt="%Y-%m-%d %H:%M:%S"):
@@ -820,7 +1009,7 @@ def format_time(dt, time_fmt="%Y-%m-%d %H:%M:%S") -> str:
     return dt.strftime(time_fmt)
 
 
-def format_now(time_fmt="%Y-%m-%d %H:%M:%S", now: Optional[datetime.datetime] = None) -> str:
+def format_now(time_fmt="%Y-%m-%d %H:%M:%S", now: datetime.datetime | None = None) -> str:
     now = now or get_now()
     return format_time(now, time_fmt=time_fmt)
 
@@ -861,7 +1050,9 @@ def remove_old_version_portable_chrome_files(current_chrome_version: int):
     2. chrome_portable_{ver}.7z
     3. chrome_portable_{ver}
     """
-    logger.info(color("bold_green") + f"开始尝试清理非当前版本的便携版chrome相关文件，当前chrome版本为{current_chrome_version}")
+    logger.info(
+        color("bold_green") + f"开始尝试清理非当前版本的便携版chrome相关文件，当前chrome版本为{current_chrome_version}"
+    )
 
     chrome_file_regex = [
         r"chromedriver_(?P<version>\d+)\.exe",
@@ -923,7 +1114,7 @@ def clean_dir_to_size(dir_name: str, max_logs_size: int = 1024 * MiB, keep_logs_
     )
 
     # 获取全部日志文件，并按照时间升序排列
-    def _get_all_files_sort_by_mtime() -> List[pathlib.Path]:
+    def _get_all_files_sort_by_mtime() -> list[pathlib.Path]:
         logs = list(pathlib.Path(dir_name).glob("**/*"))
 
         def sort_key(f: pathlib.Path):
@@ -1133,11 +1324,11 @@ def with_cache(
     cache_category: str,
     cache_key: str,
     cache_miss_func: Callable[[], Any],
-    cache_validate_func: Optional[Callable[[Any], bool]] = None,
+    cache_validate_func: Callable[[Any], bool] | None = None,
     cache_max_seconds=600,
     force_update=False,
-    cache_value_unmarshal_func: Optional[Callable[[Any], Any]] = None,
-    cache_hit_func: Optional[Callable[[Any], None]] = None,
+    cache_value_unmarshal_func: Callable[[Any], Any] | None = None,
+    cache_hit_func: Callable[[Any], None] | None = None,
     return_none_on_exception=False,
 ):
     """
@@ -1161,7 +1352,9 @@ def with_cache(
 
         if cache_value_unmarshal_func is not None:
             cache_info.value = cache_value_unmarshal_func(cache_info.value)
-            logger.debug(f"{cache_category} {cache_key} 提供了反序列化函数，将对缓存数据进行转换，结果为 {cache_info.value}")
+            logger.debug(
+                f"{cache_category} {cache_key} 提供了反序列化函数，将对缓存数据进行转换，结果为 {cache_info.value}"
+            )
 
         cached_value = cache_info.value
 
@@ -1170,9 +1363,10 @@ def with_cache(
                 cache_info.get_update_at() + datetime.timedelta(seconds=cache_max_seconds) >= get_now()
                 or cache_max_seconds == never_expired_cache_seconds
             ):
-
                 if cache_validate_func is None or cache_validate_func(cache_info.value):
-                    logger.debug(f"{cache_category} {cache_key} 本地缓存尚未过期，且检验有效，将使用缓存内容。缓存信息为 {cache_info}")
+                    logger.debug(
+                        f"{cache_category} {cache_key} 本地缓存尚未过期，且检验有效，将使用缓存内容。缓存信息为 {cache_info}"
+                    )
 
                     if cache_hit_func:
                         cache_hit_func(cache_info.value)
@@ -1332,21 +1526,24 @@ ignore_caller_names = {
     "post",
     "amesvr_request",
     "ide_request",
-    "check_bind_account",
     "is_guanjia_openid_expired",
-    "fetch_guanjia_openid",
     "wrapper",
     "show_head_line",
     "show_ams_act_info",
     "show_amesvr_act_info",
     "show_not_ams_act_info",
-    "query_dnf_rolelist",
     "temporary_change_bind_and_do",
     "try_do_with_lucky_role_and_normal_role",
     "try_request",
     "wang_get",
     "wegame_post",
     "yoyo_post",
+    "<lambda>",
+    "with_cache",
+    "get_bind_role_list",
+    "prepare_wpe_act_openid_accesstoken",
+    "message_box",
+    "async_message_box",
 }
 
 ignore_prefixes = [
@@ -1354,6 +1551,7 @@ ignore_prefixes = [
     "do_",
     "query_",
     "_",
+    "fetch_",
 ]
 ignore_suffixes = [
     "_op",
@@ -1386,7 +1584,7 @@ def get_meaningful_call_point_for_log() -> str:
     return ""
 
 
-def startswith_any(string: str, prefixes: List[str]) -> bool:
+def startswith_any(string: str, prefixes: list[str]) -> bool:
     for prefix in prefixes:
         if string.startswith(prefix):
             return True
@@ -1394,7 +1592,7 @@ def startswith_any(string: str, prefixes: List[str]) -> bool:
     return False
 
 
-def endswith_any(string: str, suffixes: List[str]) -> bool:
+def endswith_any(string: str, suffixes: list[str]) -> bool:
     for suffix in suffixes:
         if string.endswith(suffix):
             return True
@@ -1402,7 +1600,7 @@ def endswith_any(string: str, suffixes: List[str]) -> bool:
     return False
 
 
-def extract_between(html: str, prefix: str, suffix: str, typ: Type) -> Any:
+def extract_between(html: str, prefix: str, suffix: str, typ: type) -> Any:
     prefix_idx = html.index(prefix) + len(prefix)
     suffix_idx = html.index(suffix, prefix_idx)
 
@@ -1447,6 +1645,9 @@ def sync_configs(source_dir: str, target_dir: str):
     """
     将指定的配置相关文件从 源目录 覆盖到 目标目录
     """
+    from config import config
+    from qq_login import QQLogin
+
     sync_config_list = [
         # 配置文件
         "config.toml",
@@ -1461,6 +1662,16 @@ def sync_configs(source_dir: str, target_dir: str):
         # # 自动更新DLC
         # "utils/auto_updater.exe"
     ]
+
+    cfg = config()
+    current_chrome_version = QQLogin(cfg.common).get_chrome_major_version()
+    sync_config_list.extend(
+        [
+            # chrome相关文件，避免反复下载
+            f"utils/chrome_portable_{current_chrome_version}.7z",
+            f"utils/chromedriver_{current_chrome_version}.exe",
+        ]
+    )
 
     logger.debug(f"将以下配置从{source_dir} 复制并覆盖到 {target_dir}")
 
@@ -1489,7 +1700,7 @@ def sync_configs(source_dir: str, target_dir: str):
             shutil.copyfile(source, destination)
 
 
-def start_and_end_date_of_a_month(date: datetime.datetime) -> Tuple[datetime.datetime, datetime.datetime]:
+def start_and_end_date_of_a_month(date: datetime.datetime) -> tuple[datetime.datetime, datetime.datetime]:
     """
     返回对应时间所在月的起始和结束时间点，形如 2021-07-01 00:00:00 和 2021-07-31 23:59:59
     """
@@ -1536,12 +1747,22 @@ def exists_auto_updater_dlc():
     return os.path.isfile(auto_updater_path())
 
 
+def exists_auto_updater_dlc_and_not_empty() -> bool:
+    return exists_auto_updater_dlc() and os.stat(auto_updater_path()).st_size > 0
+
+
 def auto_updater_path():
     return os.path.realpath("utils/auto_updater.exe")
 
 
 def auto_updater_latest_path():
     return os.path.realpath("utils/auto_updater_latest.exe")
+
+
+def remove_prefix(input_string: str, prefix: str) -> str:
+    if prefix and input_string.startswith(prefix):
+        return input_string[len(prefix) :]
+    return input_string
 
 
 def remove_suffix(input_string: str, suffix: str) -> str:
@@ -1616,14 +1837,14 @@ def pause_and_exit(code=-1):
     sys.exit(code)
 
 
-def bytes_arr_to_hex_str(bytes_arr: List[int]) -> str:
+def bytes_arr_to_hex_str(bytes_arr: list[int]) -> str:
     """
     [0x58, 0x59, 0x01, 0x00, 0x00] => "0x58, 0x59, 0x01, 0x00, 0x00"
     """
     return ", ".join("0x%02x" % b for b in bytes_arr)
 
 
-def hex_str_to_bytes_arr(bytes_str: str) -> List[int]:
+def hex_str_to_bytes_arr(bytes_str: str) -> list[int]:
     """
     "0x58, 0x59, 0x01, 0x00, 0x00" => [0x58, 0x59, 0x01, 0x00, 0x00]
     """
@@ -1634,8 +1855,20 @@ def utf8len(s: str) -> int:
     return len(s.encode("utf-8"))
 
 
-def base64_str(text: str) -> str:
+def base64_encode(text: str) -> str:
     return base64.standard_b64encode(text.encode()).decode()
+
+
+def base64_decode(text: str) -> str:
+    return base64.standard_b64decode(text.encode()).decode()
+
+
+def urlsafe_base64_encode(text: str) -> str:
+    return base64.urlsafe_b64encode(text.encode()).decode()
+
+
+def urlsafe_base64_decode(text: str) -> str:
+    return base64.urlsafe_b64decode(text.encode()).decode()
 
 
 def json_compact(val) -> str:
@@ -1650,12 +1883,16 @@ def use_new_pay_method() -> bool:
     return not os.path.isfile(get_url_config_path())
 
 
-def double_quote(strToQuote: str) -> str:
-    return quote_plus(quote_plus(strToQuote))
+def double_quote(str_to_quote: str) -> str:
+    return quote_plus(quote_plus(str_to_quote))
 
 
-def triple_quote(strToQuote: str) -> str:
-    return quote_plus(double_quote(strToQuote))
+def triple_quote(str_to_quote: str) -> str:
+    return quote_plus(double_quote(str_to_quote))
+
+
+def double_unquote(str_to_unquote: str) -> str:
+    return unquote_plus(unquote_plus(str_to_unquote))
 
 
 def show_progress(file_name: str, total_size: int, now_size: int, used_seconds: float = 0.0):
@@ -1680,8 +1917,18 @@ def show_progress(file_name: str, total_size: int, now_size: int, used_seconds: 
         print("")  # 下载完成换行
 
 
-def post_json_to_data(json_data: Dict[str, Any]) -> str:
+def post_json_to_data(json_data: dict[str, Any]) -> str:
     return "&".join([f"{k}={v}" for k, v in json_data.items()])
+
+
+def generate_raw_data_template(param_name_list: list[str]) -> str:
+    """
+    ["a", "b", "c"] => "a={a}&b={b}&c={c}"
+
+    :param param_name_list: post raw data 的参数列表
+    :return: 生成对应的post data的模板字符串
+    """
+    return "&".join([f"{param_name}={{{param_name}}}" for param_name in param_name_list])
 
 
 def clear_file(file_path: str):
@@ -1696,6 +1943,73 @@ def demo_remove_chrome():
     cfg = config()
     current_chrome_version = QQLogin(cfg.common).get_chrome_major_version()
     remove_old_version_portable_chrome_files(current_chrome_version)
+
+
+def get_logger_func(print_warning: bool, logger_func=None):
+    if logger_func is None:
+        logger_func = logger.warning
+    return logger_func if print_warning else logger.debug
+
+
+def download_chrome_driver(version: str, download_dir: str, dir_src_path: str) -> str:
+    from download import download_file
+
+    windows_zip_name = "chromedriver_win32"
+    windows_zip = f"{windows_zip_name}.zip"
+
+    latest_download_url = f"https://chromedriver.storage.googleapis.com/{version}/{windows_zip}"
+
+    logger.info(f"指定的chrome driver版本为: {version}，下载地址为 {latest_download_url}")
+
+    zip_file = download_file(latest_download_url, download_dir)
+    decompress_dir_with_bandizip(zip_file, dir_src_path=dir_src_path, dst_parent_folder=download_dir)
+
+    # 移除临时文件
+    remove_file(zip_file)
+
+    # 有时候解压出来会在子目录中，这里移动出来
+    windows_zip_name_dir = os.path.join(download_dir, windows_zip_name)
+    if os.path.isdir(windows_zip_name_dir):
+        shutil.move(f"{windows_zip_name_dir}/chromedriver.exe", "chromedriver.exe")
+        shutil.rmtree(windows_zip_name_dir)
+
+    # 重命名
+    major_version = parse_major_version(version)
+    chrome_driver = f"{download_dir}/chromedriver_{major_version}.exe"
+    shutil.move(f"{download_dir}/chromedriver.exe", chrome_driver)
+    logger.info(f"重命名为 {chrome_driver}")
+
+    final_path = os.path.realpath(chrome_driver)
+    version_info = subprocess.check_output([final_path, "--version"]).decode("utf-8")
+    logger.info(color("bold_green") + f"chrome获取完毕，chrome driver版本为 {version_info}")
+
+    return final_path
+
+
+def parse_major_version(latest_version: str) -> int:
+    return int(latest_version.split(".")[0])
+
+
+def open_with_default_app(file_path: str):
+    webbrowser.open(os.path.realpath(file_path))
+
+
+def get_first_exists_dict_value(kv: dict, *keys: str) -> Any:
+    for key in keys:
+        if key in kv:
+            return kv[key]
+
+    return None
+
+
+def show_act_not_enable_warning(act_name: str):
+    logger.warning(f"未启用领取 {act_name} 功能，将跳过")
+
+
+def get_time_since_last_update() -> datetime.timedelta:
+    now = get_now()
+    time_since_last_update = now - datetime.datetime.strptime(ver_time, "%Y.%m.%d")
+    return time_since_last_update
 
 
 if __name__ == "__main__":
@@ -1721,5 +2035,8 @@ if __name__ == "__main__":
 
     # message_box("测试弹窗内容", "测试标题", use_qt_messagebox=True)
 
-    demo_remove_chrome()
-    pass
+    # demo_remove_chrome()
+
+    # print(f"下次常规活动的预估时间：{get_next_regular_activity_name_and_expected_datetime()}")
+
+    print(f"距离上次更新的时间：{get_time_since_last_update()}")

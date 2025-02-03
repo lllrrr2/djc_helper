@@ -1,6 +1,7 @@
 # 初始化依赖脚本
 import argparse
 import os
+import shutil
 import subprocess
 
 from log import color, logger
@@ -8,7 +9,7 @@ from util import bypass_proxy, show_head_line
 
 
 def init_venv_and_requirements(
-    venv_path=".venv", requirements_path="requirements.txt", disable_douban=False, enable_proxy=False
+    venv_path=".venv", requirements_path="requirements.txt", disable_douban=False, enable_proxy=False, reset_venv=False
 ):
     if not enable_proxy:
         logger.info("当前已无视系统代理")
@@ -18,6 +19,10 @@ def init_venv_and_requirements(
     pyscript_path = os.path.join(venv_path, "Scripts")
     py_path = os.path.join(pyscript_path, "python")
     pip_path = os.path.join(pyscript_path, "pip")
+
+    if reset_venv:
+        show_head_line("先清空原来的环境，确保每次从头开始准备环境，避免莫名其妙的问题", color("bold_yellow"))
+        shutil.rmtree(venv_path, ignore_errors=True)
 
     show_head_line("尝试初始化venv环境", color("bold_yellow"))
 
@@ -79,6 +84,7 @@ def parse_args():
     parser.add_argument("--venv_path", default=".venv")
     parser.add_argument("--requirements_path", default="requirements.txt")
     parser.add_argument("--dev", action="store_true")
+    parser.add_argument("--reset_venv", action="store_true")
     args = parser.parse_args()
 
     if args.dev:
@@ -90,4 +96,6 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    init_venv_and_requirements(args.venv_path, args.requirements_path, args.disable_douban, args.enable_proxy)
+    init_venv_and_requirements(
+        args.venv_path, args.requirements_path, args.disable_douban, args.enable_proxy, args.reset_venv
+    )

@@ -1,20 +1,51 @@
 from __future__ import annotations
 
+import functools
 import os
+from datetime import timedelta
 from urllib.parse import quote
 
 import requests
 
+from const import downloads_dir
 from dao import ConfigInterface, to_raw_type
+from download import DOWNLOAD_CONNECT_TIMEOUT, download_file, progress_callback_func_type
 from log import color, logger
-from util import get_now, human_readable_size, with_cache
+from server import get_alist_server_addr
+from util import KiB, get_now, human_readable_size, reset_cache, with_cache
 
-SERVER_ADDR = "http://114.132.252.185:5244"
+fn_SERVER_ADDR = get_alist_server_addr
 
-API_LOGIN = f"{SERVER_ADDR}/api/auth/login"
-API_UPLOAD = f"{SERVER_ADDR}/api/fs/put"
-API_LIST = f"{SERVER_ADDR}/api/fs/list"
-API_REMOVE = f"{SERVER_ADDR}/api/fs/remove"
+
+def _make_api(api_name="/") -> str:
+    return f"{fn_SERVER_ADDR()}{api_name}"
+
+
+def fn_API_LOGIN():
+    return _make_api("/api/auth/login")
+
+
+def fn_API_UPLOAD():
+    return _make_api("/api/fs/put")
+
+
+def fn_API_DOWNLOAD():
+    return _make_api("/api/fs/get")
+
+
+def fn_API_LIST():
+    return _make_api("/api/fs/list")
+
+
+def fn_API_REMOVE():
+    return _make_api("/api/fs/remove")
+
+
+NORMAL_TIMEOUT = 8
+UPLOAD_TIMEOUT = 60 * 5
+
+alist_session = requests.session()
+alist_session.request = functools.partial(alist_session.request, timeout=NORMAL_TIMEOUT)  # type: ignore
 
 
 class CommonResponse(ConfigInterface):
@@ -43,7 +74,7 @@ class LoginResponse(ConfigInterface):
 class ListRequest(ConfigInterface):
     def __init__(self):
         self.path = ""
-        self.passwrod = ""
+        self.password = ""
         self.refresh = False
         self.page = 1
         self.per_page = 0
@@ -74,6 +105,37 @@ class Content(ConfigInterface):
         self.type = 1
 
 
+class DownloadRequest(ConfigInterface):
+    def __init__(self):
+        self.path = ""
+        self.password = ""
+
+
+class DownloadResponse(ConfigInterface):
+    def __init__(self):
+        self.name = "DNF蚊子腿小助手_v20.0.1_by风之凌殇.7z"
+        self.size = 51111681
+        self.is_dir = False
+        self.modified = "2022-10-28T10:38:13+08:00"
+        self.sign = "h9zSwqaagxTsodawAGF53ICbv19t0_y9FJP2qj2gjhA=:0"
+        self.thumb = ""
+        self.type = 0
+        self.raw_url = ""
+        self.readme = ""
+        self.provider = "Aliyundrive"
+        self.related = None
+
+        # 用于构建下载链接的参数，使用时设置
+        self.remote_file_path = ""
+
+    def get_url(self) -> str:
+        if self.sign != "" and self.remote_file_path != "":
+            # 尽量使用alist的下载接口做中转，这样服务器日志方便查看下载情况
+            return f"{fn_SERVER_ADDR()}/d{self.remote_file_path}?sign={self.sign}"
+
+        return self.raw_url
+
+
 class RemoveRequest(ConfigInterface):
     def __init__(self):
         self.dir = "/"
@@ -95,7 +157,7 @@ def _login(username: str, password: str, otp_code: str = "") -> str:
     req.password = password
     req.otp_code = otp_code
 
-    raw_res = requests.post(API_LOGIN, json=to_raw_type(req))
+    raw_res = alist_session.post(fn_API_LOGIN(), json=to_raw_type(req))
 
     res = CommonResponse().auto_update_config(raw_res.json())
     if res.code != 200:
@@ -130,14 +192,15 @@ def upload(local_file_path: str, remote_file_path: str = "", old_version_name_pr
     start_time = get_now()
 
     with open(local_file_path, "rb") as file_to_upload:
-        raw_res = requests.put(
-            API_UPLOAD,
+        raw_res = alist_session.put(
+            fn_API_UPLOAD(),
             data=file_to_upload,
             headers={
                 "File-Path": quote(remote_file_path),
                 "As-Task": "false",
                 "Authorization": login_using_env(),
             },
+            timeout=UPLOAD_TIMEOUT,
         )
 
         res = CommonResponse().auto_update_config(raw_res.json())
@@ -155,20 +218,7 @@ def upload(local_file_path: str, remote_file_path: str = "", old_version_name_pr
     remote_dir = os.path.dirname(remote_file_path)
     remote_filename = os.path.basename(remote_file_path)
     if old_version_name_prefix != "":
-        logger.info(f"将移除网盘目录 {remote_dir} 中 前缀为 {old_version_name_prefix} 的文件")
-        dir_file_list_info = get_file_list(remote_dir, refresh=True)
-        for file_info in dir_file_list_info.content:
-            if file_info.is_dir:
-                continue
-
-            if not file_info.name.startswith(old_version_name_prefix):
-                continue
-
-            if file_info.name == remote_filename:
-                # 不包括最新上传的文件，因为alist会自动覆盖相同名字的文件
-                continue
-
-            remove(os.path.join(remote_dir, file_info.name))
+        remove_file_startswith_prefix(remote_dir, old_version_name_prefix, [remote_filename])
 
         logger.info("旧版本处理完毕，将开始实际上传流程")
 
@@ -176,10 +226,70 @@ def upload(local_file_path: str, remote_file_path: str = "", old_version_name_pr
     get_file_list(remote_dir, refresh=True)
 
 
-def get_download_url(remote_file_path: str):
+def remove_file_startswith_prefix(remote_dir: str, name_prefix: str, except_filename_list: list[str] | None = None):
+    logger.info(f"将移除网盘目录 {remote_dir} 中 前缀为 {name_prefix} 的文件")
+    dir_file_list_info = get_file_list(remote_dir, refresh=True)
+    for file_info in dir_file_list_info.content:
+        if file_info.is_dir:
+            continue
+
+        if not file_info.name.startswith(name_prefix):
+            continue
+
+        if except_filename_list is not None and file_info.name in except_filename_list:
+            # 不包括最新上传的文件，因为alist会自动覆盖相同名字的文件
+            continue
+
+        remove(os.path.join(remote_dir, file_info.name))
+
+
+def is_file_in_folder(remote_dir: str, filename: str) -> bool:
+    remote_filepath = os.path.join(remote_dir, filename)
+
+    try:
+        get_download_info(remote_filepath)
+        return True
+    except Exception:
+        return False
+
+
+def get_download_info(remote_file_path: str) -> DownloadResponse:
     remote_file_path = format_remote_file_path(remote_file_path)
 
-    return f"{SERVER_ADDR}/d{remote_file_path}"
+    req = DownloadRequest()
+    req.path = remote_file_path
+    req.password = ""
+
+    raw_res = alist_session.post(fn_API_DOWNLOAD(), json=to_raw_type(req))
+
+    res = CommonResponse().auto_update_config(raw_res.json())
+    if res.code != 200:
+        raise generate_exception(res, "download")
+
+    data = DownloadResponse().auto_update_config(res.data)
+
+    data.remote_file_path = remote_file_path
+
+    return data
+
+
+def download_from_alist(
+    remote_file_path: str,
+    download_dir=downloads_dir,
+    filename="",
+    connect_timeout=DOWNLOAD_CONNECT_TIMEOUT,
+    extra_progress_callback: progress_callback_func_type | None = None,
+) -> str:
+    download_info = get_download_info(remote_file_path)
+
+    if filename == "":
+        filename = download_info.name
+
+    guess_speed = 300 * KiB
+    guess_time = timedelta(seconds=download_info.size / guess_speed)
+
+    extra_info = f"文件大小为 {human_readable_size(download_info.size)}（进度条可能不会显示，请耐心等待。若下载速度为 {human_readable_size(guess_speed)}/s 预计耗时 {guess_time}）"
+    return download_file(download_info.get_url(), download_dir, filename, extra_info=extra_info)
 
 
 def get_file_list(
@@ -187,7 +297,7 @@ def get_file_list(
 ) -> ListResponse:
     req = ListRequest()
     req.path = remote_dir_path
-    req.passwrod = password
+    req.password = password
     req.page = page
     req.per_page = per_page
     req.refresh = refresh
@@ -199,10 +309,13 @@ def get_file_list(
             "Authorization": login_using_env(),
         }
 
-    raw_res = requests.post(API_LIST, json=to_raw_type(req), headers=headers)
+    raw_res = alist_session.post(fn_API_LIST(), json=to_raw_type(req), headers=headers)
 
     res = CommonResponse().auto_update_config(raw_res.json())
     if res.code != 200:
+        if res.code == 401 and "expired" in res.message:
+            reset_cache("alist")
+
         raise generate_exception(res, "list")
 
     data = ListResponse().auto_update_config(res.data)
@@ -219,13 +332,13 @@ def remove(remote_file_path: str):
     logger.info(f"开始删除网盘文件 {remote_file_path}")
 
     req = RemoveRequest()
-    req.path = dir
+    req.dir = dir
     req.names = [
         file_name,
     ]
 
-    raw_res = requests.post(
-        API_REMOVE,
+    raw_res = alist_session.post(
+        fn_API_REMOVE(),
         json=to_raw_type(req),
         headers={
             "Authorization": login_using_env(),
@@ -273,11 +386,8 @@ def demo_upload():
 
 
 def demo_download():
-    url = get_download_url("/文本编辑器、chrome浏览器、autojs、HttpCanary等小工具/chromedriver_102.exe")
-
-    from download import download_file
-
-    download_file(url)
+    filepath = download_from_alist("/文本编辑器、chrome浏览器、autojs、HttpCanary等小工具/chromedriver_102.exe")
+    logger.info(f"最终下载路径为 {filepath}")
 
 
 def demo_list():
@@ -292,6 +402,6 @@ def demove_remove():
 if __name__ == "__main__":
     # demo_login()
     # demo_upload()
-    # demo_download()
-    demo_list()
+    demo_download()
+    # demo_list()
     # demove_remove()

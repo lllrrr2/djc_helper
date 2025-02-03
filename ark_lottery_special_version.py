@@ -2,7 +2,7 @@ import datetime
 from multiprocessing import freeze_support
 
 from config import AccountConfig, CommonConfig, config, load_config
-from djc_helper import DjcHelper, is_new_version_ark_lottery
+from djc_helper import DjcHelper
 from log import color, logger
 from main_def import (
     _show_head_line,
@@ -26,7 +26,10 @@ def check_all_skey_and_pskey(cfg):
     QQLogin(cfg.common).check_and_download_chrome_ahead()
 
     if cfg.common.enable_multiprocessing and cfg.is_all_account_auto_login():
-        logger.info(color("bold_yellow") + f"已开启多进程模式({get_pool_size()})，并检测到所有账号均使用自动登录模式，将开启并行登录模式")
+        logger.info(
+            color("bold_yellow")
+            + f"已开启多进程模式({get_pool_size()})，并检测到所有账号均使用自动登录模式，将开启并行登录模式"
+        )
 
         get_pool().starmap(
             do_check_all_skey_and_pskey,
@@ -96,10 +99,7 @@ def do_run(idx: int, account_config: AccountConfig, common_config: CommonConfig)
     djcHelper.check_skey_expired()
     djcHelper.get_bind_role_list()
 
-    if is_new_version_ark_lottery():
-        djcHelper.dnf_ark_lottery()
-    else:
-        djcHelper.ark_lottery()
+    djcHelper.dnf_ark_lottery()
 
     used_time = datetime.datetime.now() - start_time
     _show_head_line(f"处理第{idx}个账户({account_config.name}) 共耗时 {used_time}")
@@ -115,7 +115,10 @@ def main():
     change_console_window_mode_async()
 
     logger.warning(f"开始运行DNF蚊子腿小助手 {special_version_name}，ver={now_version} {ver_time}，powered by {author}")
-    logger.warning(color("fg_bold_cyan") + "如果觉得我的小工具对你有所帮助，想要支持一下我的话，可以帮忙宣传一下或打开付费指引/支持一下.png，扫码打赏哦~")
+    logger.warning(
+        color("fg_bold_cyan")
+        + "如果觉得我的小工具对你有所帮助，想要支持一下我的话，请帮忙在你的小团体群或公会群宣传一下，谢谢~"
+    )
 
     # 读取配置信息
     load_config("config.toml", "config.toml.local")

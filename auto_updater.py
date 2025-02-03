@@ -1,6 +1,7 @@
 import platform
 from distutils.errors import DistutilsFileError
 
+from _create_patches import get_patch_7z_filename
 from config import CommonConfig
 from log import color, fileHandler, logger, new_file_handler
 from version import now_version, ver_time
@@ -14,10 +15,10 @@ import os
 import subprocess
 from distutils import dir_util
 
-from alist import get_download_url
+from alist import download_from_alist, is_file_in_folder
 from compress import decompress_dir_with_bandizip
 from config_cloud import config_cloud
-from download import download_file, download_latest_github_release
+from download import download_latest_github_release
 from update import get_latest_version_from_github, need_update
 from upload_lanzouyun import Uploader
 from usage_count import increase_counter
@@ -73,7 +74,9 @@ def auto_update():
 
     # note: 工作目录预期为小助手的exe所在目录
     if args.cwd == invalid_cwd:
-        logger.error("请不要直接双击打开自动更新工具，正确的用法是放到utils目录后，照常双击【DNF蚊子腿小助手.exe】来使用，小助手会自行调用自动更新DLC的")
+        logger.error(
+            "请不要直接双击打开自动更新工具，正确的用法是放到utils目录后，照常双击【DNF蚊子腿小助手.exe】来使用，小助手会自行调用自动更新DLC的"
+        )
         os.system("PAUSE")
         return
 
@@ -119,32 +122,35 @@ def get_latest_version(uploader: Uploader) -> str:
 def update(args, uploader, latest_version: str):
     logger.info("需要更新，开始更新流程")
 
-    logger.warning(color("bold_cyan") + "如果卡住了，可以 按ctrl+c 或者 点击右上角的X 强制跳过自动更新，本体仍可正常运行。")
+    logger.warning(
+        color("bold_cyan") + "如果卡住了，可以 按ctrl+c 或者 点击右上角的X 强制跳过自动更新，本体仍可正常运行。"
+    )
 
     logger.warning(color("bold_yellow") + "如果下载速度慢，可以按 任意键（比如ctrl+c） 来切换到下一个镜像")
 
-    # re: 后面再适配基于github release的增量更新方案
-    logger.warning("新版增量更新方案稍后实现，暂时先跳过")
-    # try:
-    #     # 首先尝试使用增量更新文件
-    #     patches_range = uploader.latest_patches_range()
-    #     logger.info(f"当前可以应用增量补丁更新的版本范围为{patches_range}")
-    #
-    #     can_use_patch = not need_update(args.version, patches_range[0]) and not need_update(
-    #         patches_range[1], args.version
-    #     )
-    #     if can_use_patch:
-    #         logger.info(color("bold_yellow") + "当前版本可使用增量补丁，尝试进行增量更新")
-    #
-    #         update_ok = incremental_update(args, uploader)
-    #         if update_ok:
-    #             logger.info("增量更新完毕")
-    #             report_dlc_usage("incremental update")
-    #             return
-    #         else:
-    #             logger.warning("增量更新失败，尝试默认的全量更新方案")
-    # except BaseException as e:
-    #     logger.exception("增量更新失败，尝试默认的全量更新方案", exc_info=e)
+    logger.info(color("bold_yellow") + "尝试增量更新")
+
+    config = config_cloud()
+    if config.dlc_enable_incremental_update:
+        try:
+            # 首先尝试使用增量更新文件
+            patch_7z_filename = get_patch_7z_filename(args.version, latest_version)
+
+            can_use_patch = is_file_in_folder("/", patch_7z_filename)
+            if can_use_patch:
+                logger.info(color("bold_yellow") + "当前版本可使用增量补丁，尝试进行增量更新")
+
+                update_ok = incremental_update(args, uploader, latest_version)
+                if update_ok:
+                    logger.info("增量更新完毕")
+                    report_dlc_usage("incremental update")
+                    return
+                else:
+                    logger.warning("增量更新失败，尝试默认的全量更新方案")
+        except BaseException as e:
+            logger.exception("增量更新失败，尝试默认的全量更新方案", exc_info=e)
+    else:
+        logger.info(color("bold_yellow") + "当前已在云端禁用增量更新功能，将跳过")
 
     # 保底使用全量更新
     logger.info(color("bold_yellow") + "尝试全量更新")
@@ -155,7 +161,9 @@ def update(args, uploader, latest_version: str):
             break
         except DistutilsFileError as e:
             if is_mirror_compressed_file_incomplete(e):
-                logger.error(f"[{idx}/{max_retry}] 从本次随机到的镜像下载的文件不完整，将重新尝试随机挑选一个镜像来下载")
+                logger.error(
+                    f"[{idx}/{max_retry}] 从本次随机到的镜像下载的文件不完整，将重新尝试随机挑选一个镜像来下载"
+                )
                 continue
 
             # 其他情况则继续抛出异常
@@ -179,9 +187,11 @@ def full_update(args, uploader, latest_version: str) -> bool:
 
     def download_by_alist() -> str:
         logger.warning("尝试通过alist下载")
-        download_url = get_download_url(f"/DNF蚊子腿小助手_v{latest_version}_by风之凌殇.7z")
-        filepath = download_file(
-            download_url, tmp_dir, connect_timeout=5, extra_progress_callback=check_keyboard_interrupt_on_download
+        filepath = download_from_alist(
+            f"/DNF蚊子腿小助手_v{latest_version}_by风之凌殇.7z",
+            tmp_dir,
+            connect_timeout=5,
+            extra_progress_callback=check_keyboard_interrupt_on_download,
         )
         report_dlc_usage("full_update_from_alist")
 
@@ -199,6 +209,10 @@ def full_update(args, uploader, latest_version: str) -> bool:
     config = config_cloud()
 
     logger.info("开始下载最新版本的压缩包")
+    logger.info(
+        color("bold_cyan")
+        + "如果一直在这不动，应该是在慢慢下载，就是速度比较慢而已。如果急着用，可以去群文件或群公告里的网盘自行下载最新版本"
+    )
     filepath = ""
     download_functions = []
     if config.dlc_prefer_alist:
@@ -270,19 +284,19 @@ def extract_decompressed_directory_name(filepath: str) -> str:
     return target_dir
 
 
-def incremental_update(args, uploader):
+def incremental_update(args, uploader, latest_version: str):
     remove_temp_dir("更新前，先移除临时目录，避免更新失败时这个目录会越来越大")
 
     logger.info("开始下载增量更新包")
-    filepath = uploader.download_latest_patches(tmp_dir)
+    patch_7z_filename = get_patch_7z_filename(args.version, latest_version)
+    filepath = download_from_alist(patch_7z_filename, tmp_dir)
 
     logger.info("下载完毕，开始解压缩")
     decompress(filepath, tmp_dir)
 
     kill_original_process(args.pid)
 
-    target_dir = filepath.replace(".7z", "")
-    target_patch = os.path.join(target_dir, f"{args.version}.patch")
+    target_patch = filepath.replace(".7z", "")
     logger.info(f"开始应用补丁 {target_patch}")
     if not TEST_MODE:
         # hpatchz.exe -C-diff -f . "%target_patch_file%" .

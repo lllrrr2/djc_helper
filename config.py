@@ -13,13 +13,12 @@ import toml
 from const import appVersion, cached_dir
 from dao import DnfHelperChronicleExchangeGiftInfo
 from data_struct import ConfigInterface, to_raw_type
-from first_run import is_monthly_first_run
+from first_run import is_first_run_in_runtime, is_monthly_first_run
 from log import color, consoleHandler, consoleLogFormatter, logger
 from sign import getACSRFTokenForAMS, getDjcSignParams
 from util import (
     async_message_box,
     get_config_from_env,
-    get_url_config_path,
     is_run_in_github_action,
     pause_and_exit,
     show_file_content_info,
@@ -52,9 +51,7 @@ class AccountInfoConfig(ConfigInterface):
 class BindRoleConfig(ConfigInterface):
     def __init__(self):
         # 用于领取奖励的区服ID和角色ID，若不配置，则使用道聚城绑定的dnf角色信息
-        self.dnf_server_id = (
-            ""  # 区服id可查阅utils/reference_data/dnf_server_list.js，具体值为每一个服务器配置中的v字段，如{t: "广东三区", v: "22"}表示广东三区的区服ID为"22"
-        )
+        self.dnf_server_id = ""  # 区服id可查阅utils/reference_data/dnf_server_list.js，具体值为每一个服务器配置中的v字段，如{t: "广东三区", v: "22"}表示广东三区的区服ID为"22"
         self.dnf_role_id = ""
 
     def has_config(self) -> bool:
@@ -74,10 +71,30 @@ class MobileGameRoleInfoConfig(ConfigInterface):
 
 
 class ExchangeItemConfig(ConfigInterface):
+    """
+    @see dnf_exchange_list.json5 fz_exchange_list.json5
+    """
+
     def __init__(self):
         self.iGoodsId = "753"
         self.sGoodsName = "装备品级调整箱（5个）"
         self.count = 0
+
+        # 以下字段是新版的道具兑换接口所需的额外参数
+        self.iActionId = ""
+        self.iType = ""
+        self.sBizCode = "dnf"
+
+    def get_biz_name(self) -> str:
+        if self.sBizCode == "dnf":
+            return "地下城与勇士"
+        elif self.sBizCode == "fz":
+            return "命运方舟"
+        else:
+            return self.sBizCode
+
+    def unique_key(self) -> str:
+        return f"{self.sBizCode}_{self.iGoodsId}"
 
 
 class DnfHelperChronicleExchangeItemConfig(ConfigInterface):
@@ -111,13 +128,12 @@ class FirecrackersExchangeItemConfig(ConfigInterface):
 
 class XinYueOperationConfig(ConfigInterface):
     def __init__(self):
-        self.iFlowId = "512411"
-        self.package_id = ""  # 仅礼包兑换需要这个参数，如兑换【勇者宝库】的【装备提升礼盒】的package_id为702218
+        self.iFlowId = 512411
         self.sFlowName = "输出我的任务积分"
         self.count = 1
 
     def unique_key(self) -> str:
-        return f"{self.iFlowId}_{self.package_id}"
+        return f"{self.iFlowId}"
 
 
 class XinYueAppOperationConfig(ConfigInterface):
@@ -137,7 +153,7 @@ class XinYueAppOperationConfig(ConfigInterface):
         # 也就是说，下面两种格式都支持
         # encrypted_raw_http_body = [0x58, 0x59, 0x01, 0x00]
         # encrypted_raw_http_body = "58 59 01 00"
-        self.encrypted_raw_http_body = [
+        self.encrypted_raw_http_body: list[int] | str = [
             0x58,
             0x59,
             0x01,
@@ -536,10 +552,10 @@ class ArkLotteryAwardConfig(ConfigInterface):
 class ArkLotteryConfig(ConfigInterface):
     def __init__(self):
         # 用于完成幸运勇士的区服ID和角色ID，若服务器ID留空，则使用道聚城绑定的dnf角色信息
-        self.lucky_dnf_server_id = (
-            ""  # 区服id可查阅utils/reference_data/dnf_server_list.js，具体值为每一个服务器配置中的v字段，如{t: "广东三区", v: "22"}表示广东三区的区服ID为"22"
+        self.lucky_dnf_server_id = ""  # 区服id可查阅utils/reference_data/dnf_server_list.js，具体值为每一个服务器配置中的v字段，如{t: "广东三区", v: "22"}表示广东三区的区服ID为"22"
+        self.lucky_dnf_role_id = (
+            ""  # 角色ID，不知道时可以填写区服ID，该数值留空，这样处理到抽卡的时候会用黄色字体打印出来信息
         )
-        self.lucky_dnf_role_id = ""  # 角色ID，不知道时可以填写区服ID，该数值留空，这样处理到抽卡的时候会用黄色字体打印出来信息
         # 是否领取礼包（建议仅大号开启这个功能）
         self.need_take_awards = False
 
@@ -567,10 +583,10 @@ class VipMentorConfig(ConfigInterface):
         # 领取第几个关怀礼包，可填1/2/3，一般是第二个最好
         self.take_index = 2
         # 用于完成关怀礼包的区服ID和角色ID，若服务器ID留空，则使用道聚城绑定的dnf角色信息
-        self.guanhuai_dnf_server_id = (
-            ""  # 区服id可查阅utils/reference_data/dnf_server_list.js，具体值为每一个服务器配置中的v字段，如{t: "广东三区", v: "22"}表示广东三区的区服ID为"22"
+        self.guanhuai_dnf_server_id = ""  # 区服id可查阅utils/reference_data/dnf_server_list.js，具体值为每一个服务器配置中的v字段，如{t: "广东三区", v: "22"}表示广东三区的区服ID为"22"
+        self.guanhuai_dnf_role_id = (
+            ""  # 角色ID，不知道时可以填写区服ID，该数值留空，这样处理到抽卡的时候会用黄色字体打印出来信息
         )
-        self.guanhuai_dnf_role_id = ""  # 角色ID，不知道时可以填写区服ID，该数值留空，这样处理到抽卡的时候会用黄色字体打印出来信息
 
 
 class DnfHelperInfoConfig(ConfigInterface):
@@ -653,6 +669,37 @@ class FirecrackersConfig(ConfigInterface):
         return [
             ("exchange_items", FirecrackersExchangeItemConfig),
         ]
+
+
+class ComicConfig(ConfigInterface):
+    def __init__(self):
+        # 是否开启抽奖，建议兑换完所有道具后再开启
+        self.enable_lottery = False
+        # 兑换道具信息
+        self.exchange_items: list[ComicExchangeItemConfig] = []
+
+    def fields_to_fill(self):
+        return [
+            ("exchange_items", ComicExchangeItemConfig),
+        ]
+
+    def get_exchange_item_by_index(self, index: int) -> ComicExchangeItemConfig | None:
+        for exchange_item in self.exchange_items:
+            if exchange_item.index == index:
+                return exchange_item
+
+        return None
+
+    def move_exchange_item_to_front(self):
+        self.exchange_items.sort(key=lambda item: item.count > 0, reverse=True)
+
+
+class ComicExchangeItemConfig(ConfigInterface):
+    def __init__(self):
+        self.index = 1
+        self.name = "黑钻15天"
+        self.need_star = 20
+        self.count = 1
 
 
 class FunctionSwitchesConfig(ConfigInterface):
@@ -751,8 +798,8 @@ class FunctionSwitchesConfig(ConfigInterface):
         self.get_dnf_collection = True
         # 是否领取 燃放爆竹 活动
         self.get_firecrackers = True
-        # 是否领取 DNF奥兹玛竞速 活动
-        self.get_dnf_ozma = True
+        # 是否领取 DNF巴卡尔竞速 活动
+        self.get_dnf_bakaer = True
         # 是否自动进行colg每日签到和积分领取（其他需自行操作~）
         self.get_colg_signin = True
         # 是否进行 心悦app 相关操作
@@ -767,8 +814,8 @@ class FunctionSwitchesConfig(ConfigInterface):
         self.get_dnf_comic = True
         # 是否领取 DNF十三周年庆 活动
         self.get_dnf_13 = True
-        # 是否领取 我的dnf13周年活动 活动
-        self.get_dnf_my_story = True
+        # 是否领取 dnf周年拉好友 活动
+        self.get_dnf_anniversary_friend = True
         # 是否领取 新职业预约活动 活动
         self.get_dnf_reserve = True
         # 是否领取 DNF周年庆登录活动 活动
@@ -821,8 +868,42 @@ class FunctionSwitchesConfig(ConfigInterface):
         self.get_dnf_bakaer_map = True
         # 是否领取 巴卡尔大作战 活动
         self.get_dnf_bakaer_fight = True
-        # 是否领取 colg年终盛典签到 活动
-        self.get_colg_yearly_signin = True
+        # 是否领取 colg其他活动 活动
+        self.get_colg_other_act = True
+        # 是否领取 和谐补偿活动 活动
+        self.get_dnf_compensate = True
+        # 是否领取 绑定手机活动 活动
+        self.get_dnf_bind_phone = True
+        # 是否领取 dnf助手活动wpe 活动
+        self.get_dnf_helper_wpe = True
+        # 是否领取 神界预热 活动
+        self.get_dnf_shenjie_yure = True
+        # 是否领取 拯救赛利亚 活动
+        self.get_dnf_save_sailiyam = True
+        # 是否领取 DNF年货铺 活动
+        self.get_dnf_nianhuopu = True
+        # 是否领取 DNF神界成长之路 活动
+        self.get_dnf_shenjie_grow_up = True
+        # 是否领取 超核勇士wpe 活动
+        self.get_dnf_chaohe_wpe = True
+        # 是否领取 9163补偿 活动
+        self.get_dnf_9163_apologize = True
+        # 是否领取 DNFxSNK 活动
+        self.get_dnf_snk = True
+        # 是否领取 DNF卡妮娜的心愿摇奖机 活动
+        self.get_dnf_kanina = True
+        # 是否领取 喂养删除补偿 活动
+        self.get_weiyang_compensate = True
+        # 是否领取 回流攻坚队 活动
+        self.get_dnf_socialize = True
+        # 是否领取 星与心愿 活动
+        self.get_dnf_star_and_wish = True
+        # 是否领取 灵魂石的洗礼 活动
+        self.get_soul_stone = True
+        # 是否领取 回流引导秘籍 活动
+        self.get_dnf_recall_guide = True
+        # 是否领取 新春充电计划 活动
+        self.get_new_year_signin = True
 
         # ------------ QQ空间pskey（需要登录 QQ空间 获取） ------------
         # 是否启用 集卡 功能
@@ -895,8 +976,6 @@ class AccountConfig(ConfigInterface):
         self.colg_cookie = ""
         # 虎牙 cookie
         self.huya_cookie = ""
-        # 漫画活动是否自动抽奖（建议手动领完需要的活动后开启该开关）
-        self.comic_lottery = False
         # wegame活动的34C角色 服务器id
         self.take_award_34c_server_id = ""
         # wegame活动的34C角色 id
@@ -906,7 +985,7 @@ class AccountConfig(ConfigInterface):
         #   1. 在按月付费期间
         #   2. 开启了本开关
         #   3. 当前QQ是特邀会员或者心悦会员
-        #   4. 上周心悦战场派遣赛利亚打工并成功领取工资 3 次
+        #   4. 前两周心悦战场荣耀镖局完成运镖任务并领取奖励 6 次
         self.enable_auto_match_xinyue_team = False
 
         # 腾讯系网页登录通用账号凭据与token
@@ -920,7 +999,7 @@ class AccountConfig(ConfigInterface):
         # 兑换道具信息
         self.exchange_items: list[ExchangeItemConfig] = []
         # 心悦相关操作信息
-        self.xinyue_operations: list[XinYueOperationConfig] = []
+        self.xinyue_operations_v2: list[XinYueOperationConfig] = []
         # 心悦app相关操作
         self.xinyue_app_operations: list[XinYueAppOperationConfig] = []
         # 抽卡相关配置
@@ -935,11 +1014,13 @@ class AccountConfig(ConfigInterface):
         self.hello_voice = HelloVoiceInfoConfig()
         # 燃放爆竹相关配置
         self.firecrackers = FirecrackersConfig()
+        # 漫画相关配置
+        self.comic = ComicConfig()
 
     def fields_to_fill(self):
         return [
             ("exchange_items", ExchangeItemConfig),
-            ("xinyue_operations", XinYueOperationConfig),
+            ("xinyue_operations_v2", XinYueOperationConfig),
             ("xinyue_app_operations", XinYueAppOperationConfig),
             ("wegame_guoqing_exchange_items", WegameGuoqingExchangeItemConfig),
         ]
@@ -951,21 +1032,25 @@ class AccountConfig(ConfigInterface):
 
         if is_run_in_github_action() and not self.enable_in_github_action:
             # 若当前在github action环境中运行，且设定为不在该环境中使用该QQ，则认为未启用
-            logger.warning(f"账号 {self.name} 设定为不在github action中运行，将跳过，如需启用请修改 enable_in_github_action 配置")
+            logger.warning(
+                f"账号 {self.name} 设定为不在github action中运行，将跳过，如需启用请修改 enable_in_github_action 配置"
+            )
             return False
 
         run_env_file = ".run_env"
         if os.path.isfile(run_env_file):
             run_env = open(".run_env", encoding="utf-8").read().strip()
             if run_env in self.disable_in_run_env_list:
-                logger.warning(f"账号 {self.name} 设定为在 {run_env} 环境下禁用，将跳过，如需启用请修改 disable_in_run_env_list 配置")
+                logger.warning(
+                    f"账号 {self.name} 设定为在 {run_env} 环境下禁用，将跳过，如需启用请修改 disable_in_run_env_list 配置"
+                )
                 return False
 
         return self.enable
 
     def on_config_update(self, raw_config: dict):
         self.sDeviceID = self.getSDeviceID()
-        self.aes_key = "84e6c6dc0f9p4a56"
+        self.aes_key = "se35d32s63r7m23m"
         self.rsa_public_key_file = "utils/reference_data/public_key.der"
 
         self.updateUinSkey(self.account_info.uin, self.account_info.skey)
@@ -979,6 +1064,12 @@ class AccountConfig(ConfigInterface):
 
         if not self.check_role_id("关怀活动", self.vip_mentor.guanhuai_dnf_role_id):
             self.vip_mentor.guanhuai_dnf_role_id = ""
+
+        if not self.check_role_id("wegame活动的34C角色", self.take_award_34c_role_id):
+            self.take_award_34c_role_id = ""
+
+        if not self.check_role_id("角色绑定", self.bind_role.dnf_role_id):
+            self.bind_role.dnf_role_id = ""
 
         if self.cannot_bind_dnf_v2 and not self.function_switches.disable_most_activities_v2:
             if is_monthly_first_run(f"每月提示绑定dnf与活动开关不匹配-{self.name}"):
@@ -999,57 +1090,23 @@ class AccountConfig(ConfigInterface):
                     "禁用活动开关已开启提示",
                 )
 
-        # 移除改版前的心悦战场的周期礼包和日常任务，避免继续执行，浪费时间
-        deprecated_xinyue_operations: dict[tuple[str, str], str] = {
-            ("513581", ""): "Y600周礼包_特邀会员",
-            ("673270", ""): "月礼包_特邀会员_20200610后使用",
-            ("513573", ""): "Y600周礼包",
-            ("673269", ""): "月礼包_20200610后使用",
-            ("673262", ""): "周礼包_白名单用户",
-            ("673264", ""): "月礼包_白名单用户",
-            ("513585", ""): "累计宝箱",
-            ("512408", ""): "每月赠送双倍积分卡（仅心悦会员）",
-            ("512432", ""): "充值DNF3000点券_双倍（成就点=6）",
-            ("512435", ""): "游戏内消耗疲劳值120_双倍（成就点=6）",
-            ("512437", ""): "游戏内在线时长40_双倍（成就点=6）",
-            ("512441", ""): "游戏内PK3次_双倍（成就点=6）",
-            ("512396", ""): "充值DNF3000点券（成就点=3）",
-            ("512398", ""): "游戏内在线时长40（成就点=3）",
-            ("512400", ""): "游戏内消耗疲劳值120（成就点=3）",
-            ("512402", ""): "游戏内PK3次（成就点=3）",
-            ("512490", ""): "领取每周免做卡",
-            ("512415", ""): "充值DNF3000点券_免做（成就点=3）",
-            ("512418", ""): "游戏内消耗疲劳值120_免做（成就点=3）",
-            ("512421", ""): "游戏内在线时长40_免做（成就点=3）",
-            ("512424", ""): "游戏内PK3次_免做（成就点=3）",
-            ("512395", ""): "充值DNF2000点券（成就点=2）",
-            ("512397", ""): "游戏内在线时长30（成就点=2）",
-            ("512399", ""): "游戏内消耗疲劳值50（成就点=2）",
-            ("512401", ""): "游戏内PK2次（成就点=2）",
-            ("512393", ""): "邮箱无未读邮件（成就点=2）",
-            ("578321", ""): "精英赛投票（成就点=未知）",
-            ("512388", ""): "充值DNF1000点券（成就点=1）",
-            ("512389", ""): "游戏内在线时长15（成就点=1）",
-            ("512390", ""): "游戏内消耗疲劳值10（成就点=1）",
-            ("512391", ""): "游戏内PK1次（成就点=1）",
-        }
-
-        xinyue_operations: list[XinYueOperationConfig] = []
-        for op in self.xinyue_operations:
-            if (op.iFlowId, op.package_id) in deprecated_xinyue_operations:
-                # 已废弃
-                continue
-
-            xinyue_operations.append(op)
-
-        self.xinyue_operations = xinyue_operations
+        # 心悦兑换：移除一些已经废弃的兑换项
+        deprecated_xinyue_flow_id_list = [
+            213535,  # (213535, "装扮属性调整箱（神器）*1-（每周1次）-600勇士币"),
+        ]
+        self.xinyue_operations_v2 = [
+            item for item in self.xinyue_operations_v2 if item.iFlowId not in deprecated_xinyue_flow_id_list
+        ]
 
     def check_role_id(self, ctx, role_id) -> bool:
         if len(role_id) != 0 and not role_id.isdigit():
-            async_message_box(
-                f"账号 {self.name} 的{ctx}幸运角色ID似乎填的是昵称（{role_id}），这里需要填的是角色id，形如1282822。本次配置将置空，如需使用该功能，请在配置工具中将该字段清空，然后按照显示出来的提示操作",
-                "配置有误",
-            )
+            if is_first_run_in_runtime(f"检查角色ID-{ctx}-{role_id}"):
+                # 为避免弹窗多次，这里单个id最多弹一次窗
+                async_message_box(
+                    f"账号 {self.name} 的{ctx}的角色ID似乎填的是昵称（{role_id}），这里需要填的是角色id，形如1282822。本次配置将置空，如需使用该功能，请在配置工具中将该字段清空，然后按照显示出来的提示操作",
+                    "配置有误",
+                )
+
             return False
 
         return True
@@ -1059,9 +1116,13 @@ class AccountConfig(ConfigInterface):
         self.account_info.skey = skey
 
         self.g_tk = str(getACSRFTokenForAMS(self.account_info.skey))
-        self.sDjcSign = getDjcSignParams(
+
+    def get_sDjcSign(self) -> str:
+        sDjcSign = getDjcSignParams(
             self.aes_key, self.rsa_public_key_file, uin2qq(self.account_info.uin), self.sDeviceID, appVersion
         )
+
+        return sDjcSign
 
     def getSDeviceID(self):
         sDeviceIdFileName = os.path.join(cached_dir, f".sDeviceID.{self.name}.txt")
@@ -1081,15 +1142,15 @@ class AccountConfig(ConfigInterface):
 
         return sDeviceID
 
-    def get_exchange_item_by_iGoodsId(self, iGoodsId: str) -> ExchangeItemConfig | None:
+    def get_exchange_item_by_unique_key(self, unique_key: str) -> ExchangeItemConfig | None:
         for exchange_item in self.exchange_items:
-            if exchange_item.iGoodsId == iGoodsId:
+            if exchange_item.unique_key() == unique_key:
                 return exchange_item
 
         return None
 
     def get_xinyue_exchange_item_by_unique_key(self, unique_key: str) -> XinYueOperationConfig | None:
-        for exchange_item in self.xinyue_operations:
+        for exchange_item in self.xinyue_operations_v2:
             if exchange_item.unique_key() == unique_key:
                 return exchange_item
 
@@ -1111,6 +1172,17 @@ class AccountConfig(ConfigInterface):
                 return False
 
         return True
+
+    def get_account_cache_key(self) -> str:
+        # 默认为账号名称
+        cache_key = self.name
+        if self.account_info.has_login():
+            # 由于有些用户会通过一个个登陆账号来运行多个账号，不使用多账号配置功能
+            # 这种情况下，如果以配置名称为key，会导致这些账号获取到同样的登陆缓存信息
+            # 因此如果用户登录了，key附加实际登录的qq，确保不会混起来
+            cache_key += f"_{self.qq()}"
+
+        return cache_key
 
 
 class LoginConfig(ConfigInterface):
@@ -1270,10 +1342,6 @@ class CommonConfig(ConfigInterface):
         self.check_update_on_start = True
         # 是否在程序结束时手动检查更新
         self.check_update_on_end = False
-        # 自动更新dlc购买地址
-        self.auto_updater_dlc_purchase_url = "https://www.kami.vip/purchasing?link=auto-updater"
-        # 按月付费购买地址
-        self.pay_by_month_purchase_url = "https://www.kami.vip/purchasing?link=pay-by-month"
         # 网盘地址
         self.netdisk_link = "https://docs.qq.com/doc/DYmlqWGNPYWRDcG95"
         self.netdisk_link_for_report = self.netdisk_link
@@ -1288,6 +1356,8 @@ class CommonConfig(ConfigInterface):
         # 是否强制与道聚城的绑定角色同步，也就是说当活动角色与道聚城绑定角色不一致时，将强制修改为道聚城绑定的角色。
         # 开启后可以实现在道聚城修改绑定角色后，所有其他自动绑定的活动也将同步修改为该角色
         self.force_sync_bind_with_djc = True
+        # 是否禁用在检测到重复登录时清除全部账号登录状态的功能，若为True，则仅弹出一个提示，不做额外处理
+        self.disable_clear_login_status_when_duplicate_login = False
         # 提前多少天提示付费过期
         self.notify_pay_expired_in_days = 7
         # 马杰洛新春版本赠送卡片目标QQ
@@ -1313,6 +1383,8 @@ class CommonConfig(ConfigInterface):
         self.majieluo_invite_uin_list: list[str] = []
         # 是否弹出支付宝红包活动图片
         self.enable_alipay_redpacket_v3 = True
+        # 是否在全部账号运行完毕后再次领取编年史任务奖励，从而当本地两个号设置为搭档时可以领取到对方的经验，而不需要再运行一次
+        self.try_take_dnf_helper_chronicle_task_awards_again_after_all_accounts_run_once = False
 
         # 登录各个阶段的最大等待时间，单位秒（仅二维码登录和自动登录需要配置，数值越大容错性越好）
         self.login = LoginConfig()
@@ -1320,6 +1392,8 @@ class CommonConfig(ConfigInterface):
         self.retry = RetryConfig()
         # 心悦相关配置
         self.xinyue = XinYueConfig()
+        # 心悦固定队默认配置数目
+        self.xinyue_fixed_team_default_team_count = 5
         # 固定队相关配置。用于本地两个号来组成一个固定队伍，完成心悦任务。
         self.fixed_teams: list[FixedTeamConfig] = []
         # 赛利亚活动拜访目标QQ列表
@@ -1352,20 +1426,6 @@ class CommonConfig(ConfigInterface):
         self.auto_send_card_target_qqs = [str(qq) for qq in self.auto_send_card_target_qqs]
         self.sailiyam_visit_target_qqs = [str(qq) for qq in self.sailiyam_visit_target_qqs]
 
-        url_config_filepath = get_url_config_path()
-        if os.path.isfile(url_config_filepath):
-            try:
-                with open(url_config_filepath, encoding="utf-8-sig") as url_config_file:
-                    url_config = toml.load(url_config_file)
-                    if "auto_updater_dlc_purchase_url" in url_config:
-                        self.auto_updater_dlc_purchase_url = url_config["auto_updater_dlc_purchase_url"]
-                    if "pay_by_month_purchase_url" in url_config:
-                        self.pay_by_month_purchase_url = url_config["pay_by_month_purchase_url"]
-                    if "netdisk_link" in url_config:
-                        self.netdisk_link = url_config["netdisk_link"]
-            except Exception:
-                pass
-
         # 替换网盘链接中的域名为蓝奏云api中最新的域名
         from lanzou.api import LanZouCloud
 
@@ -1373,6 +1433,18 @@ class CommonConfig(ConfigInterface):
         self.netdisk_link = LanZouCloud().get_latest_url_shuffled(self.netdisk_link)
         # 上报统计时，为确保固定，替换为shuffle前最新的域名
         self.netdisk_link_for_report = LanZouCloud().get_latest_url_before_shuffle(self.netdisk_link)
+
+        # 心悦固定队添加一些默认配置
+        xinyue_fixed_team_current_count = len(self.fixed_teams)
+        for idx in range(self.xinyue_fixed_team_default_team_count):
+            if idx < xinyue_fixed_team_current_count:
+                continue
+
+            # 补齐默认配置
+            team_config = FixedTeamConfig()
+            team_config.id = str(idx + 1)
+
+            self.fixed_teams.append(team_config)
 
 
 class Config(ConfigInterface):
@@ -1413,7 +1485,10 @@ class Config(ConfigInterface):
                 #   2. 启用了多进程功能
                 #   3. 未启用超快速模式
                 #   4. 不存在config.toml.local文件
-                logger.info(color("bold_green") + "当前仅有一个账号，没必要开启多进程模式，且未开启超快速模式，将关闭多进程模式~")
+                logger.info(
+                    color("bold_green")
+                    + "当前仅有一个账号，没必要开启多进程模式，且未开启超快速模式，将关闭多进程模式~"
+                )
                 self.common.enable_multiprocessing = False
 
     def check(self) -> bool:
@@ -1429,14 +1504,16 @@ class Config(ConfigInterface):
             # 检查QQ号是否填写格式不对，若末尾带有换行符，会导致登录时，通过js设置标题栏时，报错：selenium.common.exceptions.JavascriptException: Message: javascript error: Invalid or unexpected token
             if account.login_mode == account.login_mode_auto_login and account.account_info.account.endswith("\n"):
                 logger.error(
-                    color("fg_bold_red") + f"第 {idx} 个账号 {account.name} 配置为账号密码登录，但QQ号末尾有多余换行符，请重新输入QQ，不要输入额外字符，如换行符。"
+                    color("fg_bold_red")
+                    + f"第 {idx} 个账号 {account.name} 配置为账号密码登录，但QQ号末尾有多余换行符，请重新输入QQ，不要输入额外字符，如换行符。"
                 )
                 return False
 
             # 检查名称是否重复
             if account.name in name2index:
                 logger.error(
-                    color("fg_bold_red") + f"第{idx}个账号的名称 {account.name} 与第{name2index[account.name]}个账号的名称重复，请调整为不同的名字"
+                    color("fg_bold_red")
+                    + f"第{idx}个账号的名称 {account.name} 与第{name2index[account.name]}个账号的名称重复，请调整为不同的名字"
                 )
                 return False
             name2index[account.name] = idx
@@ -1550,13 +1627,15 @@ def load_config(config_path="config.toml", local_config_path="config.toml.local"
         g_config.auto_update_config(raw_config)
     except UnicodeDecodeError as error:
         logger.error(
-            color("fg_bold_yellow") + f"{config_path}的编码格式有问题，应为utf-8，如果使用系统自带记事本的话，请下载vscode等文本编辑器\n错误信息：{error}\n"
+            color("fg_bold_yellow")
+            + f"{config_path}的编码格式有问题，应为utf-8，如果使用系统自带记事本的话，请下载vscode等文本编辑器\n错误信息：{error}\n"
         )
         raise error
     except Exception as error:
         if encoding_error_str in str(error):
             logger.error(
-                color("fg_bold_yellow") + f"{config_path}的编码格式有问题，应为utf-8，如果使用系统自带记事本的话，请下载vscode等文本编辑器\n错误信息：{error}\n"
+                color("fg_bold_yellow")
+                + f"{config_path}的编码格式有问题，应为utf-8，如果使用系统自带记事本的话，请下载vscode等文本编辑器\n错误信息：{error}\n"
             )
             raise error
 
@@ -1655,7 +1734,9 @@ def gen_config_for_github_action():
     account_configs = []
     for account_cfg in cfg.account_configs:
         if not account_cfg.enable_in_github_action:
-            logger.warning(color("bold_yellow") + f"{account_cfg.name} 配置为不在github action环境中启用，将不尝试导出该账号")
+            logger.warning(
+                color("bold_yellow") + f"{account_cfg.name} 配置为不在github action环境中启用，将不尝试导出该账号"
+            )
             continue
 
         account_configs.append(account_cfg)
@@ -1733,8 +1814,6 @@ if __name__ == "__main__":
     logger.info(config().common.account_count)
 
     cfg = config()
-    print(cfg.common.auto_updater_dlc_purchase_url)
-    print(cfg.common.pay_by_month_purchase_url)
     print(cfg.common.netdisk_link)
     print(cfg.common.qq_group)
 

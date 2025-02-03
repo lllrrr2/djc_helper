@@ -18,6 +18,7 @@ import ga
 from check_first_run import check_first_run_async
 from config import config, load_config
 from db_def import try_migrate_db
+from djc_helper import is_ark_lottery_enabled
 from first_run import is_weekly_first_run
 from log import color, log_directory, logger
 from main_def import (
@@ -38,11 +39,14 @@ from main_def import (
     show_notices,
     show_pay_info,
     show_recommend_reward_tips,
+    show_tips_for_myself,
     try_auto_update,
+    try_auto_update_ignore_permission_on_special_case,
     try_join_xinyue_team,
     try_load_old_version_configs_from_user_data_dir,
     try_report_usage_info,
     try_save_configs_to_user_data_dir,
+    try_take_dnf_helper_chronicle_task_awards_again_after_all_accounts_run_once,
     try_take_xinyue_team_award,
 )
 from pool import close_pool, init_pool
@@ -95,9 +99,11 @@ def prepare_env():
     if args.wait_for_pid_exit != 0:
         # 通过配置工具打开
         increase_counter(ga_category="open_by", name="config_tool", ga_misc_params={"dr": "config_tool"})
-        logger.info(f"等待pid为{args.wait_for_pid_exit}的配置工具退出运行，从而确保可能有的自动更新能够正常进行，最大将等待{args.max_wait_time}秒")
+        logger.info(
+            f"等待pid为{args.wait_for_pid_exit}的配置工具退出运行，从而确保可能有的自动更新能够正常进行，最大将等待{args.max_wait_time}秒"
+        )
 
-        wait_time = 0
+        wait_time = 0.0
         retry_time = 0.1
         while wait_time <= args.max_wait_time:
             if not psutil.pid_exists(args.wait_for_pid_exit):
@@ -121,12 +127,15 @@ def main():
     # 启动时检查是否需要同步本机数据目录备份的旧版本配置
     try_load_old_version_configs_from_user_data_dir()
 
-    change_title()
+    change_title(show_next_regular_activity_info=True)
 
     print_update_message_on_first_run_new_version()
 
     logger.warning(f"开始运行DNF蚊子腿小助手，ver={now_version} {ver_time}，powered by {author}")
-    logger.warning(color("fg_bold_cyan") + "如果觉得我的小工具对你有所帮助，想要支持一下我的话，可以帮忙宣传一下或打开付费指引/支持一下.png，扫码打赏哦~")
+    logger.warning(
+        color("fg_bold_cyan")
+        + "如果觉得我的小工具对你有所帮助，想要支持一下我的话，请帮忙在你的小团体群或公会群宣传一下，谢谢~"
+    )
 
     # 读取配置信息
     load_config("config.toml", "config.toml.local")
@@ -134,6 +143,8 @@ def main():
 
     if len(cfg.account_configs) == 0:
         raise Exception("未找到有效的账号配置，请检查是否正确配置。ps：多账号版本配置与旧版本不匹配，请重新配置")
+
+    try_auto_update_ignore_permission_on_special_case(cfg)
 
     notify_manual_check_update_on_release_too_long(cfg.common)
 
@@ -155,7 +166,11 @@ def main():
     pool_size = cfg.get_pool_size()
     init_pool(pool_size)
 
-    change_title(multiprocessing_pool_size=pool_size, enable_super_fast_mode=cfg.common.enable_super_fast_mode)
+    change_title(
+        multiprocessing_pool_size=pool_size,
+        enable_super_fast_mode=cfg.common.enable_super_fast_mode,
+        show_next_regular_activity_info=True,
+    )
 
     show_multiprocessing_info(cfg)
 
@@ -201,14 +216,12 @@ def main():
     # 正式进行流程
     run(cfg, user_buy_info)
 
+    try_take_dnf_helper_chronicle_task_awards_again_after_all_accounts_run_once(cfg, user_buy_info)
+
     # 尝试领取心悦组队奖励
     try_take_xinyue_team_award(cfg, user_buy_info)
 
-    # # 尝试派赛利亚出去打工
-    # try_xinyue_sailiyam_start_work(cfg)
-
-    # 活动开启关闭时调这个开关即可
-    enable_card_lottery = True
+    enable_card_lottery = is_ark_lottery_enabled()
 
     if enable_card_lottery:
         auto_send_cards(cfg)
@@ -238,6 +251,9 @@ def main():
     try_save_configs_to_user_data_dir()
 
     increase_counter(name="run/end", ga_type=ga.GA_REPORT_TYPE_PAGE_VIEW)
+
+    # 尝试给自己展示一些提示
+    show_tips_for_myself()
 
     show_head_line("运行完毕")
 

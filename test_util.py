@@ -27,7 +27,8 @@ from util import (
     YiB,
     ZiB,
     append_if_not_in,
-    base64_str,
+    base64_decode,
+    base64_encode,
     bytes_arr_to_hex_str,
     check_some_exception,
     endswith_any,
@@ -36,14 +37,17 @@ from util import (
     format_now,
     format_time,
     format_timestamp,
+    generate_raw_data_template,
     get_cid,
     get_current,
+    get_first_exists_dict_value,
     get_last_month,
     get_last_n_days,
     get_last_week_monday,
     get_last_week_monday_datetime,
     get_meaningful_call_point_for_log,
     get_month,
+    get_next_expect_date_of_activity,
     get_now,
     get_now_unix,
     get_past_time,
@@ -74,6 +78,7 @@ from util import (
     printed_width,
     remove_invalid_unicode_escape_string,
     remove_none_from_list,
+    remove_prefix,
     remove_suffix,
     start_and_end_date_of_a_month,
     startswith_any,
@@ -82,6 +87,8 @@ from util import (
     truncate,
     try_except,
     uin2qq,
+    urlsafe_base64_decode,
+    urlsafe_base64_encode,
     use_by_myself,
     utf8len,
     will_act_expired_in,
@@ -482,6 +489,11 @@ def test_start_and_end_date_of_a_month():
     assert end_date == datetime.datetime(now_for_test.year, now_for_test.month, 31, 23, 59, 59)
 
 
+def test_remove_prefix():
+    assert remove_prefix("prefix_test", "prefix_") == "test"
+    assert remove_prefix("prefix_test", "not_exist_prefix") == "prefix_test"
+
+
 def test_remove_suffix():
     assert remove_suffix("test_suffix", "_suffix") == "test"
     assert remove_suffix("test_suffix", "not_exist_suffix") == "test_suffix"
@@ -524,16 +536,133 @@ def test_utf8len():
     assert utf8len("test测试") == 10
 
 
-def test_base64_str():
-    assert base64_str("test") == "dGVzdA=="
-    assert base64_str("测试") == "5rWL6K+V"
-    assert base64_str("&&&=12kjsabdsa") == "JiYmPTEya2pzYWJkc2E="
+def test_base64_encode():
+    assert base64_encode("test") == "dGVzdA=="
+    assert base64_encode("测试") == "5rWL6K+V"
+    assert base64_encode("&&&=12kjsabdsa") == "JiYmPTEya2pzYWJkc2E="
+    assert base64_encode("广西一区") == "5bm/6KW/5LiA5Yy6"
+    assert base64_encode("游戏领域大神") == "5ri45oiP6aKG5Z+f5aSn56We"
+
+
+def test_base64_decode():
+    assert base64_decode("dGVzdA==") == "test"
+    assert base64_decode("5rWL6K+V") == "测试"
+    assert base64_decode("JiYmPTEya2pzYWJkc2E=") == "&&&=12kjsabdsa"
+    assert base64_decode("5bm/6KW/5LiA5Yy6") == "广西一区"
+    assert base64_decode("5ri45oiP6aKG5Z+f5aSn56We") == "游戏领域大神"
+
+
+def test_urlsafe_base64_encode():
+    assert urlsafe_base64_encode("test") == "dGVzdA=="
+    assert urlsafe_base64_encode("测试") == "5rWL6K-V"
+    assert urlsafe_base64_encode("&&&=12kjsabdsa") == "JiYmPTEya2pzYWJkc2E="
+    assert urlsafe_base64_encode("广西一区") == "5bm_6KW_5LiA5Yy6"
+    assert urlsafe_base64_encode("游戏领域大神") == "5ri45oiP6aKG5Z-f5aSn56We"
+
+
+def test_urlsafe_base64_decode():
+    assert urlsafe_base64_decode("dGVzdA==") == "test"
+    assert urlsafe_base64_decode("5rWL6K+V") == "测试"
+    assert urlsafe_base64_decode("JiYmPTEya2pzYWJkc2E=") == "&&&=12kjsabdsa"
+    assert urlsafe_base64_decode("5bm_6KW_5LiA5Yy6") == "广西一区"
+    assert urlsafe_base64_decode("5ri45oiP6aKG5Z-f5aSn56We") == "游戏领域大神"
 
 
 def test_post_json_to_data():
     assert post_json_to_data({}) == ""
     assert post_json_to_data({"k": "v"}) == "k=v"
     assert post_json_to_data({"k1": "v1", "k2": "v2"}) == "k1=v1&k2=v2"
+
+
+def test_generate_raw_data_template():
+    assert generate_raw_data_template([]) == ""
+    assert generate_raw_data_template(["a"]) == "a={a}"
+    assert generate_raw_data_template(["a", "b", "c"]) == "a={a}&b={b}&c={c}"
+
+    # fmt: off
+
+    # 以下为改造为新的写法时，新版与旧版的数据
+    # 新写法
+    amesvr_default_params_list = [
+        "iActivityId", "g_tk", "iFlowId", "package_id", "lqlevel", "teamid", "weekDay", "eas_url", "sServiceDepartment", "sServiceType", "sArea", "sRoleId", "uin", "userId", "token", "sRoleName",
+        "serverId", "areaId", "skey", "nickName", "date", "dzid", "page", "iPackageId", "plat", "extraStr", "sContent", "sPartition", "sAreaName", "md5str", "ams_md5str", "ams_checkparam",
+        "checkparam", "type", "moduleId", "giftId", "acceptId", "invitee", "giftNum", "sendQQ", "receiver", "receiverName", "inviterName", "user_area", "user_partition", "user_areaName",
+        "user_roleId", "user_roleName", "user_roleLevel", "user_checkparam", "user_md5str", "user_sex", "user_platId", "cz", "dj", "siActivityId", "needADD", "dateInfo", "sId", "userNum",
+        "cardType", "inviteId", "sendName", "receiveUin", "receiverUrl", "index", "pageNow", "pageSize", "clickTime", "username", "petId", "skin_id", "decoration_id", "fuin", "sCode", "sNickName",
+        "iId", "sendPage", "hello_id", "prize", "qd", "iReceiveUin", "map1", "map2", "len", "itemIndex", "sRole", "loginNum", "level", "inviteUin", "iGuestUin", "ukey", "iGiftID", "iInviter",
+        "iPageNow", "iPageSize", "iType", "iWork", "iPage", "sNick", "iMatchId", "iGameId", "iIPId", "iVoteId", "iResult", "personAct", "teamAct", "param", "dhnums", "sUin", "pointID", "workId",
+        "isSort", "jobName", "title", "actSign", "iNum", "prefer", "card", "answer1", "answer2", "answer3", "countsInfo", "power", "crossTime", "getLv105", "use_fatigue", "exchangeId", "sChannel",
+        "pass", "pass_date", "bossId", "today", "anchor", "sNum", "week", "position", "packages", "selectNo", "targetQQ", "u_confirm",
+    ]
+    amesvr_raw_data = "xhrPostKey=xhr_{millseconds}&eas_refer=http%3A%2F%2Fnoreferrer%2F%3Freqid%3D{uuid}%26version%3D23&e_code=0&g_code=0&xhr=1" + "&" + generate_raw_data_template(amesvr_default_params_list)
+    # 旧写法
+    amesvr_raw_data_old_version = (
+        "iActivityId={iActivityId}&g_tk={g_tk}&iFlowId={iFlowId}&package_id={package_id}&xhrPostKey=xhr_{millseconds}&eas_refer=http%3A%2F%2Fnoreferrer%2F%3Freqid%3D{uuid}%26version%3D23&lqlevel={lqlevel}"
+        "&teamid={teamid}&weekDay={weekDay}&e_code=0&g_code=0&eas_url={eas_url}&xhr=1&sServiceDepartment={sServiceDepartment}&sServiceType={sServiceType}&sArea={sArea}&sRoleId={sRoleId}&uin={uin}"
+        "&userId={userId}&token={token}&sRoleName={sRoleName}&serverId={serverId}&areaId={areaId}&skey={skey}&nickName={nickName}&date={date}&dzid={dzid}&page={page}&iPackageId={iPackageId}&plat={plat}"
+        "&extraStr={extraStr}&sContent={sContent}&sPartition={sPartition}&sAreaName={sAreaName}&md5str={md5str}&ams_md5str={ams_md5str}&ams_checkparam={ams_checkparam}&checkparam={checkparam}&type={type}&moduleId={moduleId}"
+        "&giftId={giftId}&acceptId={acceptId}&invitee={invitee}&giftNum={giftNum}&sendQQ={sendQQ}&receiver={receiver}&receiverName={receiverName}&inviterName={inviterName}&user_area={user_area}"
+        "&user_partition={user_partition}&user_areaName={user_areaName}&user_roleId={user_roleId}&user_roleName={user_roleName}&user_roleLevel={user_roleLevel}&user_checkparam={user_checkparam}"
+        "&user_md5str={user_md5str}&user_sex={user_sex}&user_platId={user_platId}&cz={cz}&dj={dj}&siActivityId={siActivityId}&needADD={needADD}&dateInfo={dateInfo}&sId={sId}&userNum={userNum}"
+        "&cardType={cardType}&inviteId={inviteId}&sendName={sendName}&receiveUin={receiveUin}&receiverUrl={receiverUrl}&index={index}&pageNow={pageNow}&pageSize={pageSize}&clickTime={clickTime}"
+        "&username={username}&petId={petId}&skin_id={skin_id}&decoration_id={decoration_id}&fuin={fuin}&sCode={sCode}&sNickName={sNickName}&iId={iId}&sendPage={sendPage}&hello_id={hello_id}"
+        "&prize={prize}&qd={qd}&iReceiveUin={iReceiveUin}&map1={map1}&map2={map2}&len={len}&itemIndex={itemIndex}&sRole={sRole}&loginNum={loginNum}&level={level}&inviteUin={inviteUin}"
+        "&iGuestUin={iGuestUin}&ukey={ukey}&iGiftID={iGiftID}&iInviter={iInviter}&iPageNow={iPageNow}&iPageSize={iPageSize}&iType={iType}&iWork={iWork}&iPage={iPage}&sNick={sNick}"
+        "&iMatchId={iMatchId}&iGameId={iGameId}&iIPId={iIPId}&iVoteId={iVoteId}&iResult={iResult}&personAct={personAct}&teamAct={teamAct}&param={param}&dhnums={dhnums}&sUin={sUin}&pointID={pointID}"
+        "&workId={workId}&isSort={isSort}&jobName={jobName}&title={title}&actSign={actSign}&iNum={iNum}&prefer={prefer}&card={card}&answer1={answer1}&answer2={answer2}&answer3={answer3}"
+        "&countsInfo={countsInfo}&power={power}&crossTime={crossTime}&getLv105={getLv105}&use_fatigue={use_fatigue}&exchangeId={exchangeId}&sChannel={sChannel}&pass={pass}&pass_date={pass_date}"
+        "&bossId={bossId}&today={today}&anchor={anchor}&sNum={sNum}&week={week}&position={position}&packages={packages}&selectNo={selectNo}&targetQQ={targetQQ}&u_confirm={u_confirm}"
+    )
+    # 需要确保此时使用该函数生成的结果与原来是等价的（也就是基于 & 分割后的列表经过排序后完全一致）
+    assert sorted(amesvr_raw_data.split("&")) == sorted(amesvr_raw_data_old_version.split("&"))
+
+    # 同样的，下面是ide活动参数改造时的测试数据
+    ide_default_params_list = [
+        "iChartId", "iSubChartId", "sIdeToken", "sRoleId", "sRoleName", "sArea", "sMd5str", "sCheckparam", "roleJob", "sAreaName", "sAuthInfo", "sActivityInfo", "openid", "sCode", "startPos",
+        "eas_url", "eas_refer", "iType", "iPage", "type", "sUin", "dayNum", "iFarmland", "fieldId", "sRice", "packageId", "targetId", "myId", "id", "iCardId", "iAreaId", "sRole", "drinksId",
+        "gameId", "score", "loginDays", "iSuccess", "iGameId", "sAnswer", "index", "u_stage", "u_task_index", "u_stage_index", "num", "sPartition", "sPlatId", "source",
+    ]
+    ide_raw_data = "e_code=0&g_code=0" + "&" + generate_raw_data_template(ide_default_params_list)
+    ide_raw_data_old_version = (
+        "iChartId={iChartId}&iSubChartId={iSubChartId}&sIdeToken={sIdeToken}"
+        "&sRoleId={sRoleId}&sRoleName={sRoleName}&sArea={sArea}&sMd5str={sMd5str}&sCheckparam={sCheckparam}&roleJob={roleJob}&sAreaName={sAreaName}"
+        "&sAuthInfo={sAuthInfo}&sActivityInfo={sActivityInfo}&openid={openid}&sCode={sCode}&startPos={startPos}"
+        "&e_code=0&g_code=0&eas_url={eas_url}&eas_refer={eas_refer}&iType={iType}&iPage={iPage}&type={type}&sUin={sUin}&dayNum={dayNum}"
+        "&iFarmland={iFarmland}&fieldId={fieldId}&sRice={sRice}&packageId={packageId}&targetId={targetId}&myId={myId}&id={id}"
+        "&iCardId={iCardId}&iAreaId={iAreaId}&sRole={sRole}&drinksId={drinksId}&gameId={gameId}&score={score}&loginDays={loginDays}"
+        "&iSuccess={iSuccess}&iGameId={iGameId}&sAnswer={sAnswer}&index={index}&u_stage={u_stage}&u_task_index={u_task_index}&u_stage_index={u_stage_index}&num={num}"
+        "&sPartition={sPartition}&sPlatId={sPlatId}&source={source}"
+    )
+    assert sorted(ide_raw_data.split("&")) == sorted(ide_raw_data_old_version.split("&"))
+
+    # 将原来的空值默认中中包含在上面两个列表中的移除，得到剩余部分。确保这个与ame和ide的合集中，包含原来默认空值的全部值（允许超出，因为ame和ide中部分值是在调用时传入，或者是有值的默认值）
+    other_default_params_list = [
+        "iActionId", "iGoodsId", "sBizCode", "partition", "iZoneId", "platid", "sZoneDesc", "sGetterDream", "isLock", "amsid", "iLbSel1", "mold", "exNum", "iCard", "actionId",
+        "adLevel", "adPower", "pUserId", "isBind", "toUin", "appid", "appOpenid", "accessToken", "iRoleId", "randomSeed", "taskId", "point", "cRand", "tghappid", "sig",
+        "date_chronicle_sign_in", "flow_id",
+    ]
+    default_params_list_old_version = [
+        "package_id", "lqlevel", "teamid", "weekDay", "sArea", "serverId", "areaId", "nickName", "sRoleId", "sRoleName", "uin", "skey", "userId", "token", "iActionId", "iGoodsId", "sBizCode",
+        "partition", "iZoneId", "platid", "sZoneDesc", "sGetterDream", "dzid", "page", "iPackageId", "isLock", "amsid", "iLbSel1", "num", "mold", "exNum", "iCard", "iNum", "actionId", "plat",
+        "extraStr", "sContent", "sPartition", "sAreaName", "md5str", "ams_md5str", "ams_checkparam", "checkparam", "type", "moduleId", "giftId", "acceptId", "sendQQ", "cardType", "giftNum",
+        "inviteId", "inviterName", "sendName", "invitee", "receiveUin", "receiver", "receiverName", "receiverUrl", "inviteUin", "user_area", "user_partition", "user_areaName", "user_roleId",
+        "user_roleName", "user_roleLevel", "user_checkparam", "user_md5str", "user_sex", "user_platId", "cz", "dj", "siActivityId", "needADD", "dateInfo", "sId", "userNum", "index", "pageNow",
+        "pageSize", "clickTime", "skin_id", "decoration_id", "adLevel", "adPower", "username", "petId", "fuin", "sCode", "sNickName", "iId", "sendPage", "hello_id", "prize", "qd", "iReceiveUin",
+        "map1", "map2", "len", "itemIndex", "sRole", "loginNum", "level", "iGuestUin", "ukey", "iGiftID", "iInviter", "iPageNow", "iPageSize", "pUserId", "isBind", "iType", "iWork", "iPage",
+        "sNick", "iMatchId", "iGameId", "iIPId", "iVoteId", "iResult", "personAct", "teamAct", "sRoleId", "sRoleName", "sArea", "sMd5str", "sCheckparam", "roleJob", "sAreaName", "sAuthInfo",
+        "sActivityInfo", "openid", "param", "dhnums", "sUin", "pointID", "startPos", "workId", "isSort", "jobName", "title", "toUin", "actSign", "prefer", "card", "answer1", "answer2", "answer3",
+        "countsInfo", "power", "appid", "appOpenid", "accessToken", "iAreaId", "iRoleId", "randomSeed", "taskId", "point", "cRand", "tghappid", "sig", "date_chronicle_sign_in", "crossTime",
+        "getLv105", "use_fatigue", "dayNum", "iFarmland", "fieldId", "sRice", "exchangeId", "sChannel", "flow_id", "pass", "pass_date", "packageId", "targetId", "myId", "id", "bossId", "iCardId",
+        "today", "anchor", "sNum", "week", "position", "packages", "selectNo", "targetQQ", "drinksId", "gameId", "score", "loginDays", "iSuccess", "sAnswer", "u_stage", "u_task_index",
+        "u_stage_index", "u_confirm", "sPlatId", "source",
+    ]
+
+    new_union = set().union(set(other_default_params_list), set(amesvr_default_params_list), set(ide_default_params_list))
+    old_default_set = set(default_params_list_old_version)
+    # 确保旧的默认值集合是新合集的子集
+    assert new_union.intersection(old_default_set) == old_default_set
+
+    # fmt: on
 
 
 def test_parse_url_param():
@@ -545,3 +674,60 @@ def test_parse_url_param():
     assert parse_url_param(url, "a") == a
     assert parse_url_param(url, "b") == b
     assert parse_url_param(url, "c") == c
+
+
+def test_get_first_exists_dict_value():
+    old_k = "k1"
+    new_k = "K1"
+    kv = {
+        old_k: old_k,
+    }
+
+    assert get_first_exists_dict_value(kv, old_k) == old_k
+    assert get_first_exists_dict_value(kv, new_k) is None
+
+    del kv[old_k]
+    kv[new_k] = old_k
+    assert get_first_exists_dict_value(kv, old_k) is None
+    assert get_first_exists_dict_value(kv, new_k) == old_k
+
+
+def test_define_table_using_zip():
+    heads = ["head1", "head2", "head3"]
+    colSizes = [1, 2, 3]
+
+    heads_new, colSizes_new = zip(
+        ("head1", 1),
+        ("head2", 2),
+        ("head3", 3),
+    )
+
+    assert heads == list(heads_new)
+    assert colSizes == list(colSizes_new)
+
+
+def test_get_next_expect_date_of_activity():
+    now = parse_time("2024-06-01 12:34:56")
+
+    # 今年该活动尚未开始，应返回明年的
+    assert get_next_expect_date_of_activity(
+        [
+            datetime.datetime(2020, 9, 24),
+            datetime.datetime(2021, 9, 14),
+            datetime.datetime(2022, 9, 22),
+            datetime.datetime(2023, 9, 24),
+            # datetime.datetime(2024, 9, 12),
+        ],
+        now,
+    ) == datetime.datetime(2024, 9, 20)
+
+    # 今年该活动已开始，计算出应为明年
+    assert get_next_expect_date_of_activity(
+        [
+            datetime.datetime(2021, 1, 18),
+            datetime.datetime(2022, 1, 19),
+            datetime.datetime(2023, 1, 13),
+            datetime.datetime(2024, 1, 11),
+        ],
+        now,
+    ) == datetime.datetime(2025, 1, 15)
